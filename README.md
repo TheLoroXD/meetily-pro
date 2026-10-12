@@ -15,14 +15,14 @@
 
 Records mic and system audio, transcribes live with Whisper or Parakeet, summarizes with the LLM you pick. Nothing leaves the machine unless you choose a cloud model.
 
-Fork of [Zackriya-Solutions/meetily](https://github.com/Zackriya-Solutions/meetily). Tracks upstream `main`, adds a live in-meeting assistant (see [Roadmap](#roadmap)).
+Fork of [Zackriya-Solutions/meetily](https://github.com/Zackriya-Solutions/meetily). Tracks upstream `main`, adds a live in-meeting assistant.
 
 ## Install
 
-- **Download (recommended)**: [Releases](https://github.com/asidko/meetily/releases). Until this fork ships its own, use upstream v0.4.1: [macOS arm64 .dmg](https://github.com/Zackriya-Solutions/meeting-minutes/releases/download/v0.4.1/meetily_0.4.1_aarch64.dmg), [Windows x64 .exe](https://github.com/Zackriya-Solutions/meeting-minutes/releases/download/v0.4.1/meetily_0.4.1_x64-setup.exe).
-- **Build from source**: Linux, Intel Mac, CUDA. See below.
+- **Download (recommended)**: [macOS Apple Silicon .dmg](https://github.com/asidko/meetily/releases/latest/download/meetily-macos-arm64.dmg) or [Linux x86_64 .deb](https://github.com/asidko/meetily/releases/latest/download/meetily-linux-x86_64.deb), checksums in [Releases](https://github.com/asidko/meetily/releases/latest).
+- **Build from source**: Windows, Intel Mac, CUDA. See below.
 
-macOS needs microphone and screen-recording permission (that is how system audio is captured). Windows build needs an AVX2 CPU.
+The macOS app is ad-hoc signed, not notarized. After dragging it to Applications, run `xattr -dr com.apple.quarantine /Applications/meetily.app` once. It needs microphone and screen-recording permission (that is how system audio is captured).
 
 ## Quickstart
 
@@ -30,18 +30,15 @@ macOS needs microphone and screen-recording permission (that is how system audio
 2. Pick a summary engine: built-in local model, Ollama, or a cloud key (OpenAI, Claude, Groq, OpenRouter, custom OpenAI-compatible).
 3. Choose mic and system-audio device, press Record. Stop when done, open the meeting, generate the summary.
 
-## What's new in v0.4.1
+## What's new in v1.0.0
 
-- Live speech no longer fragments into sub-4 s requests; hallucinated segments filtered on every engine.
-- Bluetooth mics on macOS wake on cold start and recover from disconnects.
-- Claude thinking blocks and Ollama reasoning stripped from summaries.
-- Windows loads a compatible ONNX Runtime at startup (Parakeet fix).
-
-[Upstream release notes](https://github.com/Zackriya-Solutions/meetily/releases/tag/v0.4.1).
+- Live assistant: a side pane while recording suggests questions to ask and facts to clarify, each linked to the moment in the transcript.
+- Pin, dismiss, copy or jump to a suggestion; pinned ones carry into the summary, and the meeting page lists what was suggested during the call.
+- Uses your summary model or a separate one; cloud providers need a one-time confirmation per provider.
+- Includes everything in upstream [v0.4.1](https://github.com/Zackriya-Solutions/meetily/releases/tag/v0.4.1).
 
 ## Roadmap
 
-- **Live assistant**: side pane during recording that suggests questions to ask and facts to clarify, each cited to a transcript timestamp. Design: [docs/LIVE_ASSISTANT_DESIGN.md](docs/LIVE_ASSISTANT_DESIGN.md).
 - **Claude Code as provider**: your own Claude Code login, tools disabled, no session files.
 
 ## Features
@@ -49,6 +46,8 @@ macOS needs microphone and screen-recording permission (that is how system audio
 Live transcription on device (Whisper with Metal/CUDA/Vulkan/ROCm, or Parakeet on CPU), VAD so only speech hits the model.
 
 <p align="center"><img src="docs/home.png" width="720" alt="Live transcription" /></p>
+
+Live assistant beside the transcript: questions and tips cited to transcript moments, off by default. Design: [docs/LIVE_ASSISTANT_DESIGN.md](docs/LIVE_ASSISTANT_DESIGN.md).
 
 Summaries from templates (standard, standup, retro, client call), editable in place.
 

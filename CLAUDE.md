@@ -51,12 +51,12 @@ cargo test -p meetily                  # full; first run compiles whisper.cpp vi
 cargo test -p meetily decoder          # filter by name
 ```
 
-CI: `.github/workflows/ci.yml` runs on push to `main` and on every PR: `pnpm lint`, `tsc --noEmit`, `bun test`, then builds the llama-helper sidecar and runs `cargo test -p meetily --locked` on Ubuntu. The build and release workflows stay `workflow_dispatch` only. Toolchain pins: `rust-toolchain.toml` (1.96.0), `frontend/.nvmrc` (20), `packageManager` in package.json.
+CI: `.github/workflows/ci.yml` runs on push to `main` and on every PR: `pnpm lint`, `tsc --noEmit`, `pnpm test`, then builds the llama-helper sidecar and runs `cargo test -p meetily --locked` on Ubuntu. `release.yml` runs on a `v*` tag push: drafts the release, builds an ad-hoc signed macOS arm64 `.dmg` and a Linux x86_64 `.deb` (no updater artifacts, the fork has no updater key), uploads `SHA256SUMS`, then publishes. Notes take the README "What's new" section. The upstream `build*.yml` workflows stay `workflow_dispatch` only and need upstream signing secrets. Toolchain pins: `rust-toolchain.toml` (1.96.0), `frontend/.nvmrc` (20), `packageManager` in package.json.
 
 ## Branches, versions, commits
 
 - This is the asidko/meetily fork: `origin` is the fork, `upstream` is Zackriya-Solutions/meetily. Branch from `main`, PR into the fork's `main`. Upstream uses `devtest` as integration branch (CONTRIBUTING.md); only matters when sending changes upstream. Conventional commit format.
-- Version is duplicated in `frontend/package.json`, `frontend/src-tauri/Cargo.toml` and `frontend/src-tauri/tauri.conf.json`; the release workflow reads `tauri.conf.json`. Bump all three.
+- Version is duplicated in `frontend/package.json`, `frontend/src-tauri/Cargo.toml` and `frontend/src-tauri/tauri.conf.json`; the release workflow fails unless all three match the tag. Bump all three, refresh "What's new" in the README, then tag `vX.Y.Z` and push. The updater endpoint points at this fork's releases, so fork builds never pull upstream's.
 
 ## Architecture
 
