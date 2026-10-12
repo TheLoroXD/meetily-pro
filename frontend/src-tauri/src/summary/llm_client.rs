@@ -45,6 +45,19 @@ pub struct ChatRequest {
     pub reasoning_effort: Option<&'static str>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CompletionOptions {
+    pub json_mode: bool,
+    pub max_tokens: Option<u32>,
+}
+
+fn supports_json_mode(provider: &LLMProvider) -> bool {
+    matches!(
+        provider,
+        LLMProvider::OpenAI | LLMProvider::Groq | LLMProvider::Ollama
+    )
+}
+
 /// Build OpenAI-compat JSON body.
 pub fn build_openai_compat_chat_body(
     provider: &LLMProvider,
@@ -54,14 +67,19 @@ pub fn build_openai_compat_chat_body(
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
+    options: CompletionOptions,
 ) -> serde_json::Value {
     let (max_tokens_val, temperature_val, top_p_val) = if *provider == LLMProvider::CustomOpenAI {
         (max_tokens, temperature, top_p)
     } else {
         (None, None, None)
     };
+    let max_tokens_val = match options.max_tokens {
+        Some(limit) if *provider != LLMProvider::OpenAI => Some(limit),
+        _ => max_tokens_val,
+    };
 
-    serde_json::json!(ChatRequest {
+    let mut body = serde_json::json!(ChatRequest {
         model: model_name.to_string(),
         messages: vec![
             ChatMessage {
@@ -77,7 +95,11 @@ pub fn build_openai_compat_chat_body(
         temperature: temperature_val,
         top_p: top_p_val,
         reasoning_effort: (*provider == LLMProvider::Ollama).then_some("none"),
-    })
+    });
+    if options.json_mode && supports_json_mode(provider) {
+        body["response_format"] = serde_json::json!({ "type": "json_object" });
+    }
+    body
 }
 
 // Generic structure for OpenAI-compatible API chat responses
@@ -271,6 +293,41 @@ pub(crate) async fn generate_summary(
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<LlmCompletion, String> {
+    complete(
+        client,
+        provider,
+        model_name,
+        api_key,
+        system_prompt,
+        user_prompt,
+        ollama_endpoint,
+        custom_openai_endpoint,
+        max_tokens,
+        temperature,
+        top_p,
+        app_data_dir,
+        cancellation_token,
+        CompletionOptions::default(),
+    )
+    .await
+}
+
+pub(crate) async fn complete(
+    client: &Client,
+    provider: &LLMProvider,
+    model_name: &str,
+    api_key: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    ollama_endpoint: Option<&str>,
+    custom_openai_endpoint: Option<&str>,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    app_data_dir: Option<&PathBuf>,
+    cancellation_token: Option<&CancellationToken>,
+    options: CompletionOptions,
+) -> Result<LlmCompletion, String> {
     // Check if cancelled before starting
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
@@ -288,6 +345,7 @@ pub(crate) async fn generate_summary(
             model_name,
             system_prompt,
             user_prompt,
+            options.max_tokens.map(|limit| limit as i32),
             cancellation_token,
         )
         .await
@@ -376,6 +434,7 @@ pub(crate) async fn generate_summary(
             max_tokens,
             temperature,
             top_p,
+            options,
         )
     } else {
         serde_json::json!(ClaudeRequest {
@@ -572,16 +631,16 @@ mod tests {
             LLMProvider::OpenRouter,
             LLMProvider::CustomOpenAI,
         ] {
-            assert!(build_openai_compat_chat_body(&provider, "model", "sys", "user", None, None, None)
+            assert!(build_openai_compat_chat_body(&provider, "model", "sys", "user", None, None, None, CompletionOptions::default())
                 .get("reasoning_effort")
                 .is_none());
         }
         let ollama = build_openai_compat_chat_body(
-            &LLMProvider::Ollama, "model", "sys", "user", None, None, None,
+            &LLMProvider::Ollama, "model", "sys", "user", None, None, None, CompletionOptions::default(),
         );
         assert_eq!(ollama["reasoning_effort"], "none");
         let custom = build_openai_compat_chat_body(
-            &LLMProvider::CustomOpenAI, "model", "sys", "user", Some(12), Some(0.3), Some(0.8),
+            &LLMProvider::CustomOpenAI, "model", "sys", "user", Some(12), Some(0.3), Some(0.8), CompletionOptions::default(),
         );
         assert_eq!(custom["max_tokens"], 12);
         assert_eq!(custom["temperature"].as_f64(), Some(0.3_f32 as f64));

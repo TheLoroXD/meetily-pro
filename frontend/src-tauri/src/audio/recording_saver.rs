@@ -470,10 +470,50 @@ impl RecordingSaver {
     pub fn get_meeting_name(&self) -> Option<String> {
         self.meeting_name.clone()
     }
+
+    pub fn transcript_progress(&self, after_seq: Option<u64>) -> (Option<u64>, usize) {
+        let segments = self.transcript_segments.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        transcript_progress(&segments, after_seq)
+    }
+}
+
+pub fn transcript_progress(segments: &[TranscriptSegment], after_seq: Option<u64>) -> (Option<u64>, usize) {
+    segments.iter().fold((None, 0), |(newest, words), segment| {
+        let added = if after_seq.map_or(true, |after| segment.sequence_id > after) {
+            segment.text.split_whitespace().count()
+        } else {
+            0
+        };
+        (newest.max(Some(segment.sequence_id)), words + added)
+    })
 }
 
 impl Default for RecordingSaver {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transcript_progress_counts_words_after_sequence() {
+        let seg = |seq: u64, text: &str| TranscriptSegment {
+            id: String::new(),
+            text: text.to_string(),
+            audio_start_time: 0.0,
+            audio_end_time: 1.0,
+            duration: 1.0,
+            display_time: String::new(),
+            confidence: 1.0,
+            sequence_id: seq,
+        };
+        let segments = vec![seg(0, "one two"), seg(1, "three"), seg(2, "four five six")];
+        assert_eq!(transcript_progress(&segments, None), (Some(2), 6));
+        assert_eq!(transcript_progress(&segments, Some(0)), (Some(2), 4));
+        assert_eq!(transcript_progress(&segments, Some(2)), (Some(2), 0));
+        assert_eq!(transcript_progress(&[], None), (None, 0));
     }
 }

@@ -119,6 +119,13 @@ fn get_cached_model_path(app_data_dir: &PathBuf, model_name: &str) -> Result<Pat
 // Public API
 // ============================================================================
 
+pub async fn is_sidecar_busy() -> bool {
+    let global_manager = SIDECAR_MANAGER.lock().await;
+    global_manager
+        .as_ref()
+        .is_some_and(|manager| manager.active_requests() > 0)
+}
+
 /// Generate text using built-in AI
 ///
 /// # Arguments
@@ -135,6 +142,7 @@ pub async fn generate_with_builtin(
     model_name: &str,
     system_prompt: &str,
     user_prompt: &str,
+    max_tokens: Option<i32>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<String> {
     // Check cancellation at start
@@ -182,7 +190,7 @@ pub async fn generate_with_builtin(
     let sampling = model_def.sampling.sanitize_for_llama_helper();
     let request = Request::Generate {
         prompt: formatted_prompt,
-        max_tokens: Some(models::DEFAULT_MAX_TOKENS),
+        max_tokens: Some(max_tokens.unwrap_or(models::DEFAULT_MAX_TOKENS)),
         context_size: Some(model_def.context_size),
         model_path: Some(model_path.to_string_lossy().to_string()),
         temperature: Some(sampling.temperature),
@@ -204,6 +212,12 @@ pub async fn generate_with_builtin(
 
     // Race between send_request and cancellation token
     let response_json = if let Some(token) = cancellation_token {
+        let _slot = tokio::select! {
+            slot = manager.request_slot() => slot,
+            _ = token.cancelled() => {
+                return Err(anyhow!("Generation cancelled while waiting for the model"));
+            }
+        };
         tokio::select! {
             result = manager.send_request(request_json, timeout) => {
                 result?
@@ -218,6 +232,7 @@ pub async fn generate_with_builtin(
             }
         }
     } else {
+        let _slot = manager.request_slot().await;
         manager.send_request(request_json, timeout).await?
     };
 

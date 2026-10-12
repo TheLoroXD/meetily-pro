@@ -1,6 +1,6 @@
 # Live Assistant: design record
 
-Status: accepted design, not yet implemented. Date: 2026-10-12.
+Status: implemented on branch feat/live-assistant (Claude Code provider still phase 2). Date: 2026-10-12.
 Scope: one PR on the asidko/meetily fork. Phase 2 (Claude Code provider) has its contract locked here but ships later.
 
 ## Problem
@@ -49,7 +49,7 @@ Rust already holds the canonical live transcript (`RecordingSaver.transcript_seg
 - Floor between ticks: max(45 s for cloud and Ollama, 90 s for built-in, 2x the last run's duration).
 - Single-flight. A tick due mid-run sets `pending`; when the run ends, the pending tick runs with the transcript as of that moment (coalesced depth 1, never a stale snapshot).
 - Nothing while paused. Manual Refresh bypasses thresholds with a 5 s debounce.
-- Cancel in-flight only on stop, manual refresh, or when the run exceeds 2x the floor. Built-in runs are never cancelled (cancel kills the sidecar and forces a model reload); ticks are numbered and stale results are dropped.
+- Cancel in-flight on stop and pause. HTTP providers also time out after 120 s. A built-in run has no timeout of its own beyond the sidecar's, and cancelling it restarts the sidecar, which is acceptable at stop or pause but not on a timer.
 
 Rejected: fixed 60 s interval (wasteful in silence, flickers), manual only.
 
@@ -66,7 +66,7 @@ Budgets measured with `processor::rough_token_count`:
 - Ollama: `METADATA_CACHE.context_size - 800`
 - cloud: 8000 in, grow-only, trim to the last 2000 on overflow
 
-The system prompt is byte-stable. Anthropic: add `cache_control` on the system block (not sent today). Claude 5.x: send `output_config.effort: "low"`.
+The system prompt is byte-stable. Claude keeps the existing 8192-token `max_tokens`: Claude 5.x models think by default and thinking shares that budget, so a 400-token cap could return no text. `output_config.effort` is not sent because older models the user can pick (Haiku 4.5, Sonnet 4.5) reject it. Prompt caching on Anthropic is a follow-up.
 
 Rejected: full transcript every tick (cloud-only, linear cost), last N minutes without state (model forgets decisions and repeats itself).
 
@@ -80,7 +80,7 @@ Model returns one JSON object:
   "keep": ["s3", "s5"],
   "resolved": ["s1"],
   "new": [
-    {"type": "question", "text": "Who owns the data migration before Friday?", "why": "Deadline agreed at 12:34 but no owner named", "at": "12:34", "priority": 2}
+    {"type": "question", "text": "Who owns the data migration before Friday?", "why": "Deadline agreed at 12:34 but no owner named", "at": "12:34"}
   ]
 }
 ```
@@ -89,8 +89,8 @@ Model returns one JSON object:
 - Dedupe new items against open ones by word-set Jaccard >= 0.6.
 - An open item omitted from `keep` for two consecutive ticks is resolved.
 - Caps: 6 open, 3 per type, 3 new per tick. Pinned items are never resolved by the model.
-- Parse: `clean_llm_markdown_detailed` (strips fences and think blocks), slice from first `{` to last `}`, serde with `deny_unknown_fields`, length caps on `text` and `why`, URLs stripped. Fallback: lines matching `^(question|tip):`. Parse failure is logged without the body and the tick is skipped.
-- `ChatRequest` gains `response_format: {"type": "json_object"}` for OpenAI-compatible providers; Claude uses `output_config.format`.
+- Parse: `clean_llm_markdown_detailed` (strips fences and think blocks), slice from first `{` to last `}`, serde reading only the known fields (extra fields from small models are ignored, not fatal), length caps on `text` and `why`, URLs stripped. Fallback: lines matching `^(question|tip):`, which keeps every open item. Parse failure is logged without the body and counts as a failed tick.
+- OpenAI, Groq and Ollama requests carry `response_format: {"type": "json_object"}`. OpenRouter and custom endpoints do not, because model support varies and an unsupported field returns 400.
 
 Rejected: replace-all each tick (flicker, pins hard to keep).
 
@@ -115,7 +115,7 @@ Language: meeting summary-language preference if set, else `detect_summary_langu
 
 ### D10. Sidecar contention
 
-`SidecarManager.send_request` locks stdin and stdout separately, so concurrent callers can cross-wire. Add a request mutex in `summary_engine/client.rs`. Summary generation wins; a live tick that finds the sidecar busy becomes the single pending tick (D5). `max_tokens` 400 for live requests, not the summary default.
+`SidecarManager.send_request` locked stdin and stdout separately, so concurrent callers could cross-wire. It now holds a request mutex for the whole round trip. A live tick that finds the sidecar busy becomes the single pending tick (D5) instead of waiting. Live requests ask for 400 output tokens, not the summary default of 4096.
 
 ### D11. Failure policy
 
@@ -123,15 +123,16 @@ Existing items stay on screen. Header shows the reason and a Retry button. Expon
 
 ### D12. Persistence
 
-- New migration `<timestamp>_add_meeting_suggestions.sql`: `meeting_suggestions(id TEXT PK, meeting_id TEXT, kind TEXT, text TEXT, why TEXT, at_seconds REAL, sequence_id INTEGER, pinned INTEGER, dismissed INTEGER, created_at TEXT)`. Added explicitly to `delete_meeting_with_transaction` (no FK cascade in this schema).
+- New migration `<timestamp>_add_meeting_suggestions.sql`: `meeting_suggestions(id TEXT PK, meeting_id TEXT, kind TEXT, text TEXT, why TEXT, at_seconds REAL, sequence_id INTEGER, pinned INTEGER, dismissed INTEGER, created_at TEXT)`. Deleted explicitly in `delete_meeting_with_transaction` like the other child tables; the foreign key also cascades.
 - The meeting row exists only after stop, so suggestions live in the session until `useRecordingStop` saves the meeting, then `api_save_meeting_suggestions` runs.
 - Crash recovery bypasses stop: write `suggestions.json` into the meeting folder next to `metadata.json` (atomic tmp + rename) after every successful tick; `useTranscriptRecovery` imports it.
-- Settings in `tauri-plugin-store` `assistant_preferences.json`: `enabled`, `provider`, `model`, `cloud_consent: {provider: bool}`, `last_goal`, `panel_open`. Credentials stay in SQLite `SettingsRepository`.
+- Settings in `tauri-plugin-store` `assistant-preferences.json`: `enabled`, `provider`, `model`, `cloud_consent: {provider: bool}`, `last_goal`. Whether the pane is open is a per-window UI preference in `localStorage`. Credentials stay in SQLite `SettingsRepository`.
+- Provider error bodies never reach the UI or logs: an HTTP failure is reported as "Provider returned 401 Unauthorized".
 - Logs never contain prompt, response, or provider error bodies; log provider, model, tick number, duration, item counts.
 
 ### D13. UI
 
-- Right split pane, about 320 px, collapsible to an icon rail. Toggle in the `TranscriptPanel` header next to Copy and Language. Closed by default, state remembered.
+- Right split pane, about 320 px, collapsible to an icon rail that shows the open-item count. Closed by default, state remembered.
 - Pane header: goal field, provider badge, "Updated 40 s ago", Refresh, Pause.
 - Items: label Ask or Tip, text, `why` on hover, citation chip. Actions: Pin, Dismiss, Copy. Dismissed ids go back to the model as negative context.
 - New items fade in at the top; order never reshuffles; pinned stay on top.
@@ -160,7 +161,6 @@ Existing items stay on screen. Header shows the reason and a Retry button. Expon
 
 Engine control (plain verbs):
 - `start_live_assistant(goal: Option<String>) -> Result<(), String>`
-- `stop_live_assistant() -> Result<(), String>`
 - `refresh_live_assistant() -> Result<(), String>`
 - `pause_live_assistant(paused: bool) -> Result<(), String>`
 - `set_live_assistant_goal(goal: String) -> Result<(), String>`
@@ -171,13 +171,13 @@ Data (`api_` prefix):
 - `api_get_assistant_settings() -> AssistantSettings`
 - `api_save_assistant_settings(settings: AssistantSettings)`
 - `api_get_meeting_suggestions(meeting_id) -> Vec<StoredSuggestion>`
-- `api_save_meeting_suggestions(meeting_id, suggestions)`
+- `api_save_meeting_suggestions(meeting_id)`: stores the suggestions of the session that just ended
+- `api_import_assistant_snapshot(meeting_id, folder)`: reads `suggestions.json` from a recovered meeting folder
 - `claude_code_is_available() -> { installed: bool, version: Option<String>, logged_in: bool }` (phase 2)
 
 ### Events
 
-- `assistant-suggestions { tick_no, through_sequence_id, suggestions: [{ id, kind, text, why, at_seconds, sequence_id, pinned, dismissed }] }`
-- `assistant-status { state: idle | waiting | generating | paused | error, next_run_ms, last_tick_at, failures }`
+- `assistant-status`: the full `LiveAssistantState` (status idle | waiting | generating | paused | error, provider, model, is_cloud, last_tick_at, error, tick_no, state, suggestions: [{ id, kind, text, why, at_seconds, sequence_id, pinned, dismissed }])
 - `assistant-error { message }` (message is user-facing, never a provider body)
 
 ### Frontend
@@ -185,7 +185,7 @@ Data (`api_` prefix):
 - `services/assistantService.ts`: 1:1 invoke and listen wrappers.
 - `hooks/useLiveAssistant.ts`: listeners, resync on mount while recording, local pin/dismiss optimistic update.
 - `app/_components/AssistantPanel.tsx`: pane; mounted as a sibling of `TranscriptPanel` in `page.tsx` with one JSX line.
-- `components/AssistantSettings.tsx` in the settings tabs: enable switch, model pick, consent status per provider.
+- `components/AssistantSettings.tsx` on the Settings page, Summary tab: enable switch, model pick, consent status per provider.
 - `components/AssistantConsentDialog.tsx`.
 - `hooks/meeting-details/useMeetingSuggestions.ts` and a section in `MeetingDetails/SummaryPanel.tsx`.
 - `configService.ts`, `ModelSettingsModal.tsx`, `SummaryModelSettings.tsx`, `ConfigContext.modelOptions` learn the new provider in phase 2.

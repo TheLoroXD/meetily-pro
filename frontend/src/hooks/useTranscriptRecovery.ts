@@ -9,6 +9,7 @@ import { useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { indexedDBService, MeetingMetadata, StoredTranscript } from '@/services/indexedDBService';
 import { storageService } from '@/services/storageService';
+import { assistantService } from '@/services/assistantService';
 import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-preferences';
 import { toast } from 'sonner';
 
@@ -191,6 +192,14 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
         toast.warning('Could not apply default summary language', {
           description: 'The recovered meeting was saved, but the default summary language was not applied.',
         });
+      }
+
+      if (folderPath) {
+        try {
+          await assistantService.importSnapshot(savedMeetingId, folderPath);
+        } catch (error) {
+          console.warn('Live assistant snapshot import failed (non-fatal):', error);
+        }
       }
 
       // 7. Mark as saved in IndexedDB

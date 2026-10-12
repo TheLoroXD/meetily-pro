@@ -3,6 +3,7 @@
 import { MeetingSummary, Summary, Transcript } from '@/types';
 import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
+import { DuringCallSuggestions } from '@/components/MeetingDetails/DuringCallSuggestions';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
 import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
@@ -278,6 +279,8 @@ export function SummaryPanel({
           )}
         </div>
       </div>
+
+      <DuringCallSuggestions meetingId={meeting.id} />
 
       {isSummaryLoading ? (
         <div className="flex items-center justify-center flex-1">

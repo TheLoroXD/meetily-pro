@@ -6,6 +6,7 @@ import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { storageService } from '@/services/storageService';
+import { assistantService } from '@/services/assistantService';
 import { transcriptService } from '@/services/transcriptService';
 import Analytics from '@/lib/analytics';
 import {
@@ -295,6 +296,12 @@ export function useRecordingStop(
 
           // Mark meeting as saved in IndexedDB (for recovery system)
           await markMeetingAsSaved();
+
+          try {
+            await assistantService.saveMeetingSuggestions(meetingId);
+          } catch (error) {
+            console.warn('Failed to store live assistant suggestions:', error);
+          }
 
           // Clean up session storage
           sessionStorage.removeItem('last_recording_folder_path');

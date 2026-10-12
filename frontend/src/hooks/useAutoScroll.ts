@@ -50,6 +50,8 @@ export function useAutoScroll({
     // Ref to always have current autoScroll value in effects
     const autoScrollRef = useRef(autoScroll);
     autoScrollRef.current = autoScroll;
+    const segmentsRef = useRef(segments);
+    segmentsRef.current = segments;
 
     // Track if user has manually scrolled (to disable auto-scroll temporarily)
     const userScrolledRef = useRef(false);
@@ -182,7 +184,7 @@ export function useAutoScroll({
             isProgrammaticScrollRef.current = true;
 
             if (useVirtualization && virtualizer) {
-                const index = segments.findIndex((s: any) => s.id === activeSegmentId);
+                const index = segmentsRef.current.findIndex((s: any) => s.id === activeSegmentId);
                 if (index >= 0) {
                     virtualizer.scrollToIndex(index, { align: "center", behavior: "smooth" });
                 }
@@ -198,7 +200,7 @@ export function useAutoScroll({
                 isProgrammaticScrollRef.current = false;
             }, 500);
         }
-    }, [activeSegmentId, useVirtualization, virtualizer, segments]);
+    }, [activeSegmentId, useVirtualization, virtualizer]);
 
     return {
         autoScroll,
