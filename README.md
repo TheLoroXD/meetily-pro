@@ -88,7 +88,7 @@ pnpm install --frozen-lockfile
 
 Windows: `.\dev-gpu.ps1` / `.\build-gpu.ps1`. Force a backend with `TAURI_GPU_FEATURE=cuda|vulkan|hipblas|metal|coreml|openblas|none`. Details: [docs/BUILDING.md](docs/BUILDING.md), [docs/GPU_ACCELERATION.md](docs/GPU_ACCELERATION.md).
 
-Tests: `bun test` in `frontend/`, `cargo test -p meetily` at the root. Lint: `pnpm lint`.
+Tests: `pnpm test` in `frontend/` (one Bun process per file), `cargo test -p meetily` at the root. Lint: `pnpm lint`.
 
 ## Architecture
 

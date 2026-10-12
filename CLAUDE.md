@@ -36,12 +36,12 @@ The sidecar: `tauri.conf.json` lists `binaries/llama-helper` and `binaries/ffmpe
 Frontend tests use Bun's runner (`bun:test`, `react-test-renderer`), not Jest or Vitest. Files live in `frontend/tests/{hooks,lib}`.
 
 ```bash
-bun test                                       # all
+pnpm test                                      # all files, one Bun process each (scripts/run-tests.js)
 bun test tests/lib/summary-content.test.ts     # one file
-bun test -t "accepts visible markdown"         # by test name
+bun test tests/lib/summary-content.test.ts -t "accepts visible markdown"   # by test name
 ```
 
-Bun shares `mock.module` state across test files. Suites that mock app modules capture the originals and restore them in `afterAll` (see `tests/hooks/summary-generation.test.tsx`); do the same in new suites or unrelated files break.
+Never run a bare `bun test` over the whole directory: Bun shares `mock.module` state across files in one process and the suites mock the same modules (`@tauri-apps/api/core`, `next/navigation`, `sonner`) differently, so results depend on file order. The runner isolates each file. New suites still restore what they mock in `afterAll`, as the existing ones do.
 
 Rust tests are inline `#[cfg(test)]` modules (about 250 tests) plus a fixture in `src-tauri/tests/fixtures/`. Run from the repo root:
 
