@@ -37,6 +37,7 @@ const CLOUD_INPUT_TOKENS: usize = 8000;
 const OLLAMA_HEADROOM_TOKENS: usize = 800;
 const OLLAMA_FALLBACK_CONTEXT: usize = 4096;
 const MAX_ERROR_CHARS: usize = 160;
+const MAX_DISMISSED_IN_PROMPT: usize = 20;
 const HTTP_TICK_TIMEOUT: Duration = Duration::from_secs(120);
 const SNAPSHOT_FILE: &str = "suggestions.json";
 
@@ -202,6 +203,7 @@ struct AssistantInner {
     session: Option<Session>,
     last_suggestions: Vec<Suggestion>,
     last_goal: String,
+    last_state_text: String,
 }
 
 #[derive(Default)]
@@ -244,7 +246,16 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, goal: Option<String>) -> Result<(),
         settings.last_goal = goal.clone();
         let _ = settings::save(app, &settings);
     }
-    let data = Arc::new(Mutex::new(SessionData::new(goal)));
+    let mut resumed = SessionData::new(goal);
+    resumed.suggestions = inner.last_suggestions.clone();
+    resumed.state_text = inner.last_state_text.clone();
+    resumed.next_id = resumed
+        .suggestions
+        .iter()
+        .filter_map(|s| s.id.strip_prefix('s')?.parse::<u64>().ok())
+        .max()
+        .unwrap_or(0);
+    let data = Arc::new(Mutex::new(resumed));
     let token = CancellationToken::new();
     let notify = Arc::new(Notify::new());
     let session = Session { data: data.clone(), token: token.clone(), notify: notify.clone() };
@@ -264,6 +275,7 @@ pub fn on_recording_started<R: Runtime>(app: &AppHandle<R>) {
     if let Some(state) = app.try_state::<AssistantState>() {
         let mut inner = lock_inner(&state);
         inner.last_suggestions.clear();
+        inner.last_state_text.clear();
     }
     let settings = settings::load(app);
     if !settings.enabled {
@@ -297,6 +309,7 @@ fn close_session<R: Runtime>(app: &AppHandle<R>, only: Option<&Arc<Mutex<Session
     data.status = AssistantStatus::Idle;
     inner.last_suggestions = data.suggestions.clone();
     inner.last_goal = data.goal.clone();
+    inner.last_state_text = data.state_text.clone();
     emit_status(app, &data, false);
     info!("Live assistant session stopped after {} ticks", data.tick_no);
 }
@@ -341,6 +354,8 @@ pub fn set_goal<R: Runtime>(app: &AppHandle<R>, goal: String) -> Result<(), Stri
     if with_session(app, |session| {
         let mut data = lock_data(&session.data);
         data.goal = goal.clone();
+        data.pending = true;
+        session.notify.notify_one();
         emit_status(app, &data, true);
     })
     .is_none()
@@ -569,6 +584,8 @@ async fn run_tick<R: Runtime>(
             .suggestions
             .iter()
             .filter(|s| s.dismissed)
+            .rev()
+            .take(MAX_DISMISSED_IN_PROMPT)
             .map(|s| s.text.clone())
             .collect();
         prompt::build_prefix(&PromptContext {
@@ -626,7 +643,9 @@ async fn run_loop<R: Runtime>(
 ) {
     let client = reqwest::Client::new();
     let _ = plan_tick(&app, &data).await;
-    emit_status(&app, &lock_data(&data), true);
+    if !token.is_cancelled() {
+        emit_status(&app, &lock_data(&data), true);
+    }
     loop {
         tokio::select! {
             _ = token.cancelled() => break,
@@ -685,7 +704,11 @@ async fn run_loop<R: Runtime>(
             continue;
         }
 
-        let plan = match plan_tick(&app, &data).await {
+        let planned = plan_tick(&app, &data).await;
+        if token.is_cancelled() {
+            break;
+        }
+        let plan = match planned {
             Ok(plan) => plan,
             Err(error) => {
                 let mut guard = lock_data(&data);
@@ -701,6 +724,9 @@ async fn run_loop<R: Runtime>(
 
         let builtin = plan.provider_settings.provider == LLMProvider::BuiltInAI;
         if builtin && is_sidecar_busy().await {
+            if token.is_cancelled() {
+                break;
+            }
             defer_for_busy_sidecar(&app, &data);
             continue;
         }

@@ -176,6 +176,16 @@ pub async fn generate_with_builtin(
         global_manager.clone().unwrap()
     };
 
+    let _slot = match cancellation_token {
+        Some(token) => tokio::select! {
+            slot = manager.request_slot() => slot,
+            _ = token.cancelled() => {
+                return Err(anyhow!("Generation cancelled while waiting for the model"));
+            }
+        },
+        None => manager.request_slot().await,
+    };
+
     // Ensure sidecar is running with this model
     manager.ensure_running(model_path.clone()).await?;
 
@@ -212,12 +222,6 @@ pub async fn generate_with_builtin(
 
     // Race between send_request and cancellation token
     let response_json = if let Some(token) = cancellation_token {
-        let _slot = tokio::select! {
-            slot = manager.request_slot() => slot,
-            _ = token.cancelled() => {
-                return Err(anyhow!("Generation cancelled while waiting for the model"));
-            }
-        };
         tokio::select! {
             result = manager.send_request(request_json, timeout) => {
                 result?
@@ -232,7 +236,6 @@ pub async fn generate_with_builtin(
             }
         }
     } else {
-        let _slot = manager.request_slot().await;
         manager.send_request(request_json, timeout).await?
     };
 

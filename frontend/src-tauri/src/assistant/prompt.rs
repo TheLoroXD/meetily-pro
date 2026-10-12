@@ -269,6 +269,12 @@ pub fn parse_timestamp(value: &str) -> Option<f64> {
 }
 
 pub fn snap_to_segment(seconds: f64, segments: &[TranscriptSegment]) -> Option<&TranscriptSegment> {
+    if let Some(cited_start) = segments
+        .iter()
+        .find(|s| s.audio_start_time.max(0.0).floor() == seconds.floor())
+    {
+        return Some(cited_start);
+    }
     if let Some(containing) = segments
         .iter()
         .find(|s| seconds >= s.audio_start_time && seconds <= s.audio_end_time + 1.0)
@@ -487,6 +493,13 @@ mod tests {
         assert_eq!(snap_to_segment(62.0, &segs).unwrap().sequence_id, 2);
         assert_eq!(snap_to_segment(140.0, &segs).unwrap().sequence_id, 3);
         assert!(snap_to_segment(400.0, &segs).is_none());
+    }
+
+    #[test]
+    fn cited_start_wins_over_previous_segment_end() {
+        let segs = vec![segment(1, 0.0, 10.0, "first"), segment(2, 10.4, 20.0, "second")];
+        assert_eq!(snap_to_segment(10.0, &segs).unwrap().sequence_id, 2);
+        assert_eq!(snap_to_segment(5.0, &segs).unwrap().sequence_id, 1);
     }
 
     #[test]
