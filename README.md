@@ -30,12 +30,26 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 2. Pick a summary engine: built-in local model, Ollama, or a cloud key (OpenAI, Claude, Groq, OpenRouter, custom OpenAI-compatible).
 3. Choose mic and system-audio device, press Record. Stop when done, open the meeting, generate the summary.
 
-## What's new in v1.1.0
+## What's new
 
-- Live assistant is on by default, with a progress bar showing when the next tip is due; Suggest now always asks for one.
-- Chat with the assistant during the call: answers come from the transcript with clickable timestamps, and clicking a suggestion asks about it.
-- Local models no longer stall during nonstop speech: transcription pauses while the model thinks and catches up after.
-- Clearer assistant settings: a "Same as summary model" checkbox and a line showing which key, URL or server is used. Cloud providers wait for permission given right in the panel.
+### v1.1.0
+
+- The assistant is on from the start, and a bar shows when its next tip is coming. Press refresh to get one right away.
+- Ask the assistant anything during the call. Answers point to the moment it was said, and tapping a suggestion asks about it.
+- Works smoothly with models on your own computer, even when people talk without pauses.
+- Simpler assistant settings that tell you what is missing. Online models can be allowed right from the assistant panel.
+
+### v1.0.0
+
+- A new assistant next to the live transcript suggests questions to ask and things to clarify, each linked to where it was said.
+- Pin the useful suggestions to include them in the meeting summary.
+- Ready-to-install downloads for Mac and Linux.
+
+### v0.4.1 (upstream)
+
+- More accurate live transcription with fewer made-up lines.
+- Bluetooth microphones on Mac work more reliably.
+- Better summaries of long meetings.
 
 ## Roadmap
 
