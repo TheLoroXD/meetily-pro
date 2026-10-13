@@ -6,7 +6,7 @@ import {
   SummaryProcessResponse,
   Transcript,
 } from '@/types';
-import { ModelConfig } from '@/components/ModelSettingsModal';
+import type { ModelConfig } from '@/services/configService';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -486,13 +486,13 @@ export function useSummaryGeneration({
           endpoint: modelConfig.ollamaEndpoint || null,
         });
         if (models.length === 0) {
-          showPreflightError('No Ollama models found. Please download gemma3:1b from Model Settings.');
+          showPreflightError('No Ollama models found. Download one in Settings > Models.');
           return;
         }
       }
       if (modelConfig.provider === 'builtin-ai') {
         if (!modelConfig.model) {
-          showPreflightError('No built-in AI model selected. Please select a model in settings.');
+          showPreflightError('No built-in AI model selected. Pick one in Settings > Models.');
           onOpenModelSettings?.();
           return;
         }
@@ -501,7 +501,7 @@ export function useSummaryGeneration({
           refresh: true,
         });
         if (!isReady) {
-          showPreflightError('Built-in AI model is not ready. Please check model settings.');
+          showPreflightError('Built-in AI model is not ready. Check Settings > Models.');
           onOpenModelSettings?.();
           return;
         }

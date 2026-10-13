@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::command;
-use reqwest::blocking::Client;
+use reqwest::Client;
+use std::time::Duration;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OpenRouterModel {
@@ -39,12 +40,30 @@ struct OpenRouterResponse {
 }
 
 #[command]
-pub fn get_openrouter_models() -> Result<Vec<OpenRouterModel>, String> {
+pub async fn get_openrouter_models(api_key: Option<String>) -> Result<Vec<OpenRouterModel>, String> {
+    let api_key = match api_key {
+        Some(key) if !key.trim().is_empty() => key.trim().to_string(),
+        _ => return Err("API key is required".to_string()),
+    };
     let client = Client::new();
+
+    let key_check = client
+        .get("https://openrouter.ai/api/v1/key")
+        .bearer_auth(&api_key)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .map_err(|e| format!("Could not reach OpenRouter: {}", e))?;
+    if !key_check.status().is_success() {
+        return Err(format!("OpenRouter rejected the request (HTTP {})", key_check.status()));
+    }
+
     let response = client
         .get("https://openrouter.ai/api/v1/models")
+        .timeout(Duration::from_secs(10))
         .send()
-        .map_err(|e| format!("Failed to make HTTP request: {}", e))?;
+        .await
+        .map_err(|e| format!("Could not reach OpenRouter: {}", e))?;
 
     if !response.status().is_success() {
         return Err(format!("HTTP request failed with status: {}", response.status()));
@@ -52,6 +71,7 @@ pub fn get_openrouter_models() -> Result<Vec<OpenRouterModel>, String> {
 
     let api_response: OpenRouterResponse = response
         .json()
+        .await
         .map_err(|e| format!("Failed to parse JSON response: {}", e))?;
 
     let models = api_response

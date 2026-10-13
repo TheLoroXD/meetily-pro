@@ -6,25 +6,18 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { TranscriptModelProps } from '@/components/TranscriptSettings';
+import type { SpeechProvider, TextProvider } from '@/lib/model-catalog';
+
+export interface TranscriptModelProps {
+  provider: SpeechProvider;
+  model: string;
+  apiKey?: string | null;
+}
 
 export interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai' | 'builtin-ai' | 'custom-openai';
+  provider: TextProvider;
   model: string;
-  whisperModel: string;
-  /**
-   * @deprecated Use providerApiKeys from ConfigContext instead.
-   * This field may contain stale data when provider changes without saving.
-   */
-  apiKey?: string | null;
   ollamaEndpoint?: string | null;
-  // Custom OpenAI fields (only populated when provider is 'custom-openai')
-  customOpenAIEndpoint?: string | null;
-  customOpenAIModel?: string | null;
-  customOpenAIApiKey?: string | null;
-  maxTokens?: number | null;
-  temperature?: number | null;
-  topP?: number | null;
 }
 
 export interface CustomOpenAIConfig {
@@ -56,7 +49,7 @@ export class ConfigService {
 
   /**
    * Get saved summary model configuration
-   * @returns Promise with { provider, model, whisperModel }
+   * @returns Promise with { provider, model, ollamaEndpoint }
    */
   async getModelConfig(): Promise<ModelConfig> {
     return invoke<ModelConfig>('api_get_model_config');

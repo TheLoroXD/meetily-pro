@@ -56,7 +56,7 @@ function Status({ initialSummary, meetingId = 'meeting-a' }: {
   const [title, updateMeetingTitle] = useState('Original title');
   state = useSummaryGeneration({
     meeting: { id: meetingId, created_at: '2026-09-01T00:00:00Z' },
-    transcripts: [], modelConfig: { provider: 'ollama', model: configuredModel, whisperModel: 'base' },
+    transcripts: [], modelConfig: { provider: 'ollama', model: configuredModel },
     isModelConfigLoading: false, selectedTemplate: 'daily_standup',
     setAiSummary, updateMeetingTitle, initialSummary,
   });

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { invoke } from '@tauri-apps/api/core';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import {
@@ -13,19 +12,7 @@ import {
   getModelDisplayName
 } from '../lib/parakeet';
 
-interface ParakeetModelManagerProps {
-  selectedModel?: string;
-  onModelSelect?: (modelName: string) => void;
-  className?: string;
-  autoSave?: boolean;
-}
-
-export function ParakeetModelManager({
-  selectedModel,
-  onModelSelect,
-  className = '',
-  autoSave = false
-}: ParakeetModelManagerProps) {
+export function ParakeetModelManager({ className = '', onModelsChange }: { className?: string; onModelsChange?: () => void }) {
   const [models, setModels] = useState<ParakeetModelInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,13 +22,11 @@ export function ParakeetModelManager({
   const [cancellingModels, setCancellingModels] = useState<Set<string>>(new Set());
 
   // Refs for stable callbacks
-  const onModelSelectRef = useRef(onModelSelect);
-  const autoSaveRef = useRef(autoSave);
+  const onModelsChangeRef = useRef(onModelsChange);
 
   useEffect(() => {
-    onModelSelectRef.current = onModelSelect;
-    autoSaveRef.current = autoSave;
-  }, [onModelSelect, autoSave]);
+    onModelsChangeRef.current = onModelsChange;
+  }, [onModelsChange]);
 
   // Progress throttle map to prevent rapid updates
   const progressThrottleRef = useRef<Map<string, { progress: number; timestamp: number }>>(new Map());
@@ -82,7 +67,7 @@ export function ParakeetModelManager({
     };
 
     initializeModels();
-  }, [initialized, listenersReady, selectedModel, onModelSelect]);
+  }, [initialized, listenersReady]);
 
   // Set up event listeners for download progress
   useEffect(() => {
@@ -116,6 +101,7 @@ export function ParakeetModelManager({
               toast.info(`${getModelDisplayName(modelName)} download cancelled`, {
                 duration: 3000
               });
+              onModelsChangeRef.current?.();
               return;
             }
 
@@ -173,14 +159,6 @@ export function ParakeetModelManager({
               description: 'Model downloaded and ready to use',
               duration: 4000
             });
-
-            // Auto-select after download using stable refs
-            if (onModelSelectRef.current) {
-              onModelSelectRef.current(modelName);
-              if (autoSaveRef.current) {
-                saveModelSelection(modelName);
-              }
-            }
           }
         ),
         listen<{ modelName: string; error: string }>(
@@ -255,18 +233,6 @@ export function ParakeetModelManager({
     };
   }, []); // Empty dependency array - listeners use refs for stable callbacks
 
-  const saveModelSelection = async (modelName: string) => {
-    try {
-      await invoke('api_save_transcript_config', {
-        provider: 'parakeet',
-        model: modelName,
-        apiKey: null
-      });
-    } catch (error) {
-      console.error('Failed to save model selection:', error);
-    }
-  };
-
   const cancelDownload = async (modelName: string) => {
     const displayInfo = getModelDisplayInfo(modelName);
     const displayName = displayInfo?.friendlyName || modelName;
@@ -331,22 +297,6 @@ export function ParakeetModelManager({
     }
   };
 
-  const selectModel = async (modelName: string) => {
-    if (onModelSelect) {
-      onModelSelect(modelName);
-    }
-
-    if (autoSave) {
-      await saveModelSelection(modelName);
-    }
-
-    const displayInfo = getModelDisplayInfo(modelName);
-    const displayName = displayInfo?.friendlyName || modelName;
-    toast.success(`Switched to ${displayName}`, {
-      duration: 3000
-    });
-  };
-
   const deleteModel = async (modelName: string) => {
     const displayInfo = getModelDisplayInfo(modelName);
     const displayName = displayInfo?.friendlyName || modelName;
@@ -357,16 +307,12 @@ export function ParakeetModelManager({
       // Refresh models list
       const modelList = await ParakeetAPI.getAvailableModels();
       setModels(modelList);
+      onModelsChangeRef.current?.();
 
       toast.success(`${displayName} deleted`, {
         description: 'Model removed to free up space',
         duration: 3000
       });
-
-      // If deleted model was selected, clear selection
-      if (selectedModel === modelName && onModelSelect) {
-        onModelSelect('');
-      }
     } catch (err) {
       console.error('Failed to delete model:', err);
       toast.error(`Failed to delete ${displayName}`, {
@@ -409,13 +355,7 @@ export function ParakeetModelManager({
       {recommendedModel && (
         <ModelCard
           model={recommendedModel}
-          isSelected={selectedModel === recommendedModel.name}
           isRecommended={true}
-          onSelect={() => {
-            if (recommendedModel.status === 'Available') {
-              selectModel(recommendedModel.name);
-            }
-          }}
           onDownload={() => downloadModel(recommendedModel.name)}
           onCancel={() => cancelDownload(recommendedModel.name)}
           onDelete={() => deleteModel(recommendedModel.name)}
@@ -431,13 +371,7 @@ export function ParakeetModelManager({
             <ModelCard
               key={model.name}
               model={model}
-              isSelected={selectedModel === model.name}
               isRecommended={false}
-              onSelect={() => {
-                if (model.status === 'Available') {
-                  selectModel(model.name);
-                }
-              }}
               onDownload={() => downloadModel(model.name)}
               onCancel={() => cancelDownload(model.name)}
               onDelete={() => deleteModel(model.name)}
@@ -447,17 +381,6 @@ export function ParakeetModelManager({
           ))}
         </div>
       )}
-
-      {/* Helper text */}
-      {selectedModel && (
-        <motion.div
-          initial={{ opacity: 0, y: -5 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-xs text-gray-500 text-center pt-2"
-        >
-          Using {getModelDisplayName(selectedModel)} for transcription
-        </motion.div>
-      )}
     </div>
   );
 }
@@ -465,9 +388,7 @@ export function ParakeetModelManager({
 // Model Card Component
 interface ModelCardProps {
   model: ParakeetModelInfo;
-  isSelected: boolean;
   isRecommended: boolean;
-  onSelect: () => void;
   onDownload: () => void;
   onCancel: () => void;
   onDelete: () => void;
@@ -477,9 +398,7 @@ interface ModelCardProps {
 
 function ModelCard({
   model,
-  isSelected,
   isRecommended,
-  onSelect,
   onDownload,
   onCancel,
   onDelete,
@@ -510,18 +429,12 @@ function ModelCard({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       className={`
-        relative rounded-lg border-2 transition-all cursor-pointer
-        ${isSelected && isAvailable
-          ? 'border-blue-500 bg-blue-50'
-          : isAvailable
-            ? 'border-gray-200 hover:border-gray-300 bg-white'
-            : 'border-gray-200 bg-gray-50'
+        relative rounded-lg border-2 transition-all
+        ${isAvailable
+          ? 'border-gray-200 hover:border-gray-300 bg-white'
+          : 'border-gray-200 bg-gray-50'
         }
-        ${isAvailable ? '' : 'cursor-default'}
       `}
-      onClick={() => {
-        if (isAvailable) onSelect();
-      }}
     >
       {/* Recommended Badge */}
       {isRecommended && (
@@ -537,15 +450,6 @@ function ModelCard({
             <div className="flex items-center gap-2 mb-1">
               <span className="text-2xl">{icon}</span>
               <h3 className="font-semibold text-gray-900">{displayName}</h3>
-              {isSelected && isAvailable && (
-                <motion.span
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  className="bg-blue-600 text-white px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1"
-                >
-                  ✓
-                </motion.span>
-              )}
             </div>
 
             {/* Tagline */}

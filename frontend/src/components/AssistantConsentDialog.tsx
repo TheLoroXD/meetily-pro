@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { providerLabel } from '@/lib/live-assistant';
+import { catalogLabel } from '@/lib/model-catalog';
 
 interface AssistantConsentDialogProps {
   provider: string | null;
@@ -11,7 +11,7 @@ interface AssistantConsentDialogProps {
 }
 
 export function AssistantConsentDialog({ provider, onConfirm, onCancel }: AssistantConsentDialogProps) {
-  const label = provider ? providerLabel(provider) : '';
+  const label = provider ? catalogLabel(provider) : '';
   return (
     <Dialog open={provider !== null} onOpenChange={(open) => { if (!open) onCancel(); }}>
       <DialogContent className="max-w-md">

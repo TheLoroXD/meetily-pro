@@ -79,18 +79,6 @@ pub struct ModelConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SaveModelConfigRequest {
-    pub provider: String,
-    pub model: String,
-    #[serde(rename = "whisperModel")]
-    pub whisper_model: String,
-    #[serde(rename = "apiKey")]
-    pub api_key: Option<String>,
-    #[serde(rename = "ollamaEndpoint")]
-    pub ollama_endpoint: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct GetApiKeyRequest {
     pub provider: String,
 }
@@ -514,60 +502,83 @@ pub async fn api_get_model_config<R: Runtime>(
 }
 
 #[tauri::command]
-pub async fn api_save_model_config<R: Runtime>(
+pub async fn api_save_summary_model<R: Runtime>(
     _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     provider: String,
     model: String,
-    whisper_model: String,
-    api_key: Option<String>,
-    ollama_endpoint: Option<String>,
-    _auth_token: Option<String>,
-) -> Result<serde_json::Value, String> {
-    log_info!(
-        "💾 api_save_model_config called (native): provider='{}', model='{}', whisperModel='{}', ollamaEndpoint={:?}",
-        &provider,
-        &model,
-        &whisper_model,
-        &ollama_endpoint
-    );
+) -> Result<(), String> {
+    log_info!("api_save_summary_model called: provider='{}', model='{}'", &provider, &model);
+    crate::summary::llm_client::LLMProvider::from_str(&provider)?;
+    if model.trim().is_empty() {
+        return Err("Model name is required".to_string());
+    }
     let pool = state.db_manager.pool();
 
-    if let Err(e) = SettingsRepository::save_model_config(
-        pool,
-        &provider,
-        &model,
-        &whisper_model,
-        ollama_endpoint.as_deref(),
-    )
-    .await
-    {
-        log_error!("❌ Failed to save model config to database: {}", e);
-        return Err(e.to_string());
-    }
+    let previous = SettingsRepository::get_model_config(pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
-    // Skip API key saving for custom-openai provider (it uses customOpenAIConfig JSON instead)
-    if let Some(key) = api_key {
-        if !key.is_empty() && provider != "custom-openai" {
-            log_info!("🔑 API key provided, saving...");
-            if let Err(e) = SettingsRepository::save_api_key(pool, &provider, &key).await {
-                log_error!("❌ Failed to save API key: {}", e);
-                return Err(e.to_string());
-            }
+    SettingsRepository::save_summary_model(pool, &provider, model.trim())
+        .await
+        .map_err(|e| {
+            log_error!("Failed to save summary model: {}", e);
+            e.to_string()
+        })?;
+
+    let left_builtin = previous.map_or(false, |p| {
+        p.provider == "builtin-ai" && (p.provider != provider || p.model != model.trim())
+    });
+    if left_builtin {
+        if let Err(e) = crate::summary::summary_engine::client::shutdown_sidecar_gracefully().await {
+            log_warn!("Failed to initiate graceful sidecar shutdown: {}", e);
         }
     }
 
-    // Trigger graceful shutdown of built-in AI sidecar if it's running
-    // This ensures that if the user switched models/providers, the old one is cleaned up
-    // The shutdown happens in the background, so it won't block the UI
-    if let Err(e) = crate::summary::summary_engine::client::shutdown_sidecar_gracefully().await {
-        log_warn!("Failed to initiate graceful sidecar shutdown: {}", e);
-    }
+    Ok(())
+}
 
-    log_info!("✅ Successfully saved model configuration to database");
-    Ok(
-        serde_json::json!({ "status": "success", "message": "Model configuration saved successfully" }),
-    )
+#[tauri::command]
+pub async fn api_save_api_key<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    provider: String,
+    api_key: String,
+) -> Result<(), String> {
+    log_info!("api_save_api_key called for provider '{}'", &provider);
+    let key = api_key.trim();
+    if key.is_empty() {
+        return Err("API key is required".to_string());
+    }
+    SettingsRepository::save_api_key(state.db_manager.pool(), &provider, key)
+        .await
+        .map_err(|e| {
+            log_error!("Failed to save API key for provider '{}': {}", &provider, e);
+            e.to_string()
+        })
+}
+
+#[tauri::command]
+pub async fn api_save_ollama_endpoint<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    endpoint: Option<String>,
+) -> Result<(), String> {
+    log_info!("api_save_ollama_endpoint called: {:?}", &endpoint);
+    let endpoint = endpoint
+        .map(|e| e.trim().trim_end_matches('/').to_string())
+        .filter(|e| !e.is_empty());
+    if let Some(url) = &endpoint {
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Err("Address must start with http:// or https://".to_string());
+        }
+    }
+    SettingsRepository::save_ollama_endpoint(state.db_manager.pool(), endpoint.as_deref())
+        .await
+        .map_err(|e| {
+            log_error!("Failed to save Ollama endpoint: {}", e);
+            e.to_string()
+        })
 }
 
 #[tauri::command]

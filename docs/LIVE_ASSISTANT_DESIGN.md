@@ -110,7 +110,7 @@ Language: `detect_summary_language` on the window, else "the transcript's langua
 - Feature on by default. Local providers run without a prompt: built-in, Ollama on localhost. An `ollamaEndpoint` that is not localhost counts as cloud. A cloud provider sends nothing until confirmed: the session starts paused without an error or toast, and the panel's Allow button (or Confirm in Settings) records consent and resumes it. Until then Pause, Suggest now and chat are disabled.
 - Cloud providers require a one-time per-provider confirmation dialog naming the provider and stating that other participants' words are sent repeatedly during the meeting. Stored per provider; re-confirm on provider change. Summary consent is never inherited.
 - Persistent badge while recording: "Sending to <Provider>", "Needs permission" before consent, "On device" for local providers; the model is in its tooltip. Pause cancels in-flight requests.
-- Model pick in Settings, Summary: a "Same as summary model" checkbox, on by default. Unchecked, it shows provider and model: downloaded built-in models and the Ollama models found at the configured URL come from lists, cloud models are typed. API keys, the Ollama URL and the custom endpoint are shared with the summary model settings, and the panel says which one is used or what is missing. Provider config is re-read from the DB on every tick (`model-config-updated` is UI-emitted only).
+- Model pick in Settings, Models, AI assistant model: "Same as summary" (the default) or any model that is ready right now from the providers set up on the same page. API keys, the Ollama URL and the custom endpoint are shared with the summary model. Provider config is re-read from the DB on every tick.
 - All calls go through Rust `reqwest`, never from the webview.
 
 ### D10. Sidecar contention
@@ -194,10 +194,10 @@ Data (`api_` prefix):
 - `services/assistantService.ts`: 1:1 invoke and listen wrappers.
 - `hooks/useLiveAssistant.ts`: listeners, resync on mount while recording, local pin/dismiss optimistic update.
 - `app/_components/AssistantPanel.tsx`: pane; mounted as a sibling of `TranscriptPanel` in `page.tsx` with one JSX line.
-- `components/AssistantSettings.tsx` on the Settings page, Summary tab: enable switch, model pick, consent status per provider.
+- `components/model-settings/AssistantModelSettings.tsx` on the Settings page, Models tab: enable switch, model pick, consent status per provider.
 - `components/AssistantConsentDialog.tsx`.
 - `hooks/meeting-details/useMeetingSuggestions.ts` and a section in `MeetingDetails/SummaryPanel.tsx`.
-- `configService.ts`, `ModelSettingsModal.tsx`, `SummaryModelSettings.tsx`, `ConfigContext.modelOptions` learn the new provider in phase 2.
+- `configService.ts`, `lib/model-catalog.ts` and `components/model-settings/` learn the new provider in phase 2.
 
 ## Phase 2: Claude Code CLI provider
 
