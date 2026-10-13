@@ -1,56 +1,37 @@
 'use client';
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical } from 'lucide-react';
+import { ArrowLeft, Settings2, Mic, Boxes, SparkleIcon, FlaskConical } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { invoke } from '@tauri-apps/api/core';
 import { motion } from 'framer-motion';
-import { TranscriptSettings } from '@/components/TranscriptSettings';
 import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
-import { AssistantSettings } from '@/components/AssistantSettings';
-import { SummaryModelSettings } from '@/components/SummaryModelSettings';
+import { ModelsSettings } from '@/components/model-settings/ModelsSettings';
+import { SummarySettings } from '@/components/SummarySettings';
 import { BetaSettings } from '@/components/BetaSettings';
-import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 // Tabs configuration (constant)
 const TABS = [
   { value: 'general', label: 'General', icon: Settings2 },
   { value: 'recording', label: 'Recordings', icon: Mic },
-  { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
-  { value: 'summaryModels', label: 'Summary', icon: SparkleIcon },
+  { value: 'models', label: 'Models', icon: Boxes },
+  { value: 'summary', label: 'Summary', icon: SparkleIcon },
   { value: 'beta', label: 'Beta', icon: FlaskConical }
 ] as const;
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
 
   // Animation state for tabs
   const [activeTab, setActiveTab] = useState('general');
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [underlineStyle, setUnderlineStyle] = useState({ left: 0, width: 0 });
 
-  // Load saved transcript configuration on mount
   useEffect(() => {
-    const loadTranscriptConfig = async () => {
-      try {
-        const config = await invoke('api_get_transcript_config') as any;
-        if (config) {
-          console.log('Loaded saved transcript config:', config);
-          setTranscriptModelConfig({
-            provider: config.provider || 'localWhisper',
-            model: config.model || 'large-v3',
-            apiKey: config.apiKey || null
-          });
-        }
-      } catch (error) {
-        console.error('Failed to load transcript config:', error);
-      }
-    };
-    loadTranscriptConfig();
-  }, [setTranscriptModelConfig]);
+    const tab = new URLSearchParams(window.location.search).get('tab');
+    if (tab && TABS.some((t) => t.value === tab)) setActiveTab(tab);
+  }, []);
 
   // Update underline position when active tab changes
   useLayoutEffect(() => {
@@ -116,17 +97,11 @@ export default function SettingsPage() {
             <TabsContent value="recording">
               <RecordingSettings />
             </TabsContent>
-            <TabsContent value="Transcriptionmodels">
-              <TranscriptSettings
-                transcriptModelConfig={transcriptModelConfig}
-                setTranscriptModelConfig={setTranscriptModelConfig}
-              />
+            <TabsContent value="models" className="mt-6">
+              <ModelsSettings />
             </TabsContent>
-            <TabsContent value="summaryModels">
-              <SummaryModelSettings />
-              <div className="mt-6">
-                <AssistantSettings />
-              </div>
+            <TabsContent value="summary">
+              <SummarySettings />
             </TabsContent>
             <TabsContent value="beta" className="mt-6">
               <BetaSettings />

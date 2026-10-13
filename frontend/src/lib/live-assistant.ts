@@ -1,5 +1,3 @@
-import type { ModelConfig } from '@/components/ModelSettingsModal';
-
 export type SuggestionKind = 'question' | 'tip';
 
 export interface Suggestion {
@@ -46,30 +44,12 @@ export interface AssistantSettings {
   cloud_consent: Record<string, boolean>;
 }
 
-type Provider = ModelConfig['provider'];
-
-const PROVIDER_LABELS: Record<Provider, string> = {
-  'builtin-ai': 'Built-in AI',
-  ollama: 'Ollama',
-  openai: 'OpenAI',
-  claude: 'Claude',
-  groq: 'Groq',
-  openrouter: 'OpenRouter',
-  'custom-openai': 'Custom Server (OpenAI)',
-};
-
-export const PROVIDERS = Object.keys(PROVIDER_LABELS) as Provider[];
-
 export const KIND_META: Record<SuggestionKind, { label: string; badge: string; text: string }> = {
   question: { label: 'Ask', badge: 'bg-blue-50 text-blue-700', text: 'text-blue-700' },
   tip: { label: 'Tip', badge: 'bg-amber-50 text-amber-700', text: 'text-amber-700' },
 };
 
 const STALE_AFTER_MS = 3 * 60 * 1000;
-
-export function providerLabel(provider: string): string {
-  return PROVIDER_LABELS[provider as Provider] ?? provider;
-}
 
 export function hasCloudConsent(settings: AssistantSettings, provider: string): boolean {
   return settings.cloud_consent[provider] === true;

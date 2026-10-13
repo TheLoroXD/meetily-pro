@@ -1,6 +1,6 @@
 "use client";
 
-import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal';
+import { SummaryModelDialogBody } from '@/components/model-settings/SummaryModelDialogBody';
 import {
   Dialog,
   DialogContent,
@@ -22,9 +22,6 @@ import { useState, useEffect, ReactNode } from 'react';
 
 interface SummaryGeneratorButtonGroupProps {
   languageSlot?: ReactNode;
-  modelConfig: ModelConfig;
-  setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
-  onSaveModelConfig: (config?: ModelConfig) => Promise<void>;
   onGenerateSummary: (customPrompt: string) => Promise<void>;
   onStopGeneration: () => void;
   customPrompt: string;
@@ -39,9 +36,6 @@ interface SummaryGeneratorButtonGroupProps {
 }
 
 export function SummaryGeneratorButtonGroup({
-  modelConfig,
-  setModelConfig,
-  onSaveModelConfig,
   onGenerateSummary,
   onStopGeneration,
   customPrompt,
@@ -145,18 +139,9 @@ export function SummaryGeneratorButtonGroup({
           aria-describedby={undefined}
         >
           <VisuallyHidden>
-            <DialogTitle>Model Settings</DialogTitle>
+            <DialogTitle>Summary model</DialogTitle>
           </VisuallyHidden>
-          <ModelSettingsModal
-            onSave={async (config) => {
-              await onSaveModelConfig(config);
-              setSettingsDialogOpen(false);
-            }}
-            modelConfig={modelConfig}
-            setModelConfig={setModelConfig}
-            skipInitialFetch={true}
-            layout="dialog"
-          />
+          <SummaryModelDialogBody onClose={() => setSettingsDialogOpen(false)} />
         </DialogContent>
       </Dialog>
 

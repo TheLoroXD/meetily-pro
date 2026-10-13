@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { useLiveAssistant } from '@/hooks/useLiveAssistant';
-import { KIND_META, describeAge, formatClock, hasCloudConsent, providerLabel, sortSuggestions, splitCitations, withCloudConsent, type AssistantSettings, type ChatMessage, type Suggestion } from '@/lib/live-assistant';
+import { catalogLabel } from '@/lib/model-catalog';
+import { KIND_META, describeAge, formatClock, hasCloudConsent, sortSuggestions, splitCitations, withCloudConsent, type AssistantSettings, type ChatMessage, type Suggestion } from '@/lib/live-assistant';
 import { assistantService } from '@/services/assistantService';
 import { SCROLL_TO_SEGMENT_EVENT } from '@/components/VirtualizedTranscriptView';
 import { AssistantConsentDialog } from '@/components/AssistantConsentDialog';
@@ -211,7 +212,7 @@ export const AssistantPanel = memo(function AssistantPanel({ open, isRecording, 
 
   let emptyMessage: string | null = null;
   if (visible.length === 0) {
-    if (!state.active && enabled === false) emptyMessage = 'Turn on the live assistant in Settings, Summary.';
+    if (!state.active && enabled === false) emptyMessage = 'Turn on the live assistant in Settings, Models.';
     else if (!state.active && !isRecording) emptyMessage = 'Suggestions appear here while you record.';
     else if (!state.active) emptyMessage = 'Assistant is not running for this recording.';
     else if (needsConsent) emptyMessage = 'Waiting for permission to send the transcript.';
@@ -250,7 +251,7 @@ export const AssistantPanel = memo(function AssistantPanel({ open, isRecording, 
         {state.active && (
           <div className="flex items-center justify-between text-[11px]">
             <span className={`px-1.5 py-0.5 rounded ${state.is_cloud ? 'bg-orange-50 text-orange-700' : 'bg-green-50 text-green-700'}`} title={`${state.provider} / ${state.model}`}>
-              {needsConsent ? 'Needs permission' : state.is_cloud ? `Sending to ${providerLabel(state.provider)}` : 'On device'}
+              {needsConsent ? 'Needs permission' : state.is_cloud ? `Sending to ${catalogLabel(state.provider)}` : 'On device'}
             </span>
             <span className={age.stale ? 'text-orange-600' : 'text-gray-500'}>{age.label}</span>
           </div>
@@ -258,7 +259,7 @@ export const AssistantPanel = memo(function AssistantPanel({ open, isRecording, 
         {state.active && !paused && !errored && !needsConsent && <NextTickBar initial={state.progress} generating={generating} local={!state.is_cloud} />}
         {needsConsent && (
           <div className="text-xs text-orange-800 bg-orange-50 rounded p-2 flex items-start justify-between gap-2">
-            <span>{providerLabel(state.provider)} is a cloud provider. Allow sending the live transcript to get suggestions.</span>
+            <span>{catalogLabel(state.provider)} is a cloud provider. Allow sending the live transcript to get suggestions.</span>
             <button type="button" className="underline shrink-0" onClick={() => setConsentFor(state.provider)}>Allow</button>
           </div>
         )}

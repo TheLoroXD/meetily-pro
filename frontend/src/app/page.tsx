@@ -43,7 +43,7 @@ export default function Home() {
 
   // Use contexts for state management
   const { meetingTitle } = useTranscripts();
-  const { transcriptModelConfig, selectedDevices } = useConfig();
+  const { selectedDevices } = useConfig();
   const recordingState = useRecordingState();
 
   // Extract status from global state
@@ -52,7 +52,7 @@ export default function Home() {
   // Hooks
   const { hasMicrophone } = usePermissionCheck();
   const { setIsMeetingActive, isCollapsed: sidebarCollapsed, refetchMeetings } = useSidebar();
-  const { modals, messages, showModal, hideModal } = useModalState(transcriptModelConfig);
+  const { modals, messages, showModal, hideModal } = useModalState();
   const { isRecordingDisabled, setIsRecordingDisabled } = useRecordingStateSync(isRecording, setIsRecordingState, setIsMeetingActive);
   const { handleRecordingStart } = useRecordingStart(isRecording, setIsRecordingState, showModal);
 

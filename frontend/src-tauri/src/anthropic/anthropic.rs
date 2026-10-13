@@ -27,6 +27,7 @@ struct AnthropicApiResponse {
 
 /// Cache entry for models
 struct CacheEntry {
+    api_key: String,
     models: Vec<AnthropicModel>,
     fetched_at: Instant,
 }
@@ -36,25 +37,6 @@ static MODELS_CACHE: RwLock<Option<CacheEntry>> = RwLock::new(None);
 
 /// Cache TTL in seconds
 const CACHE_TTL_SECS: u64 = 300;
-
-/// Fallback models when API fetch fails (matches frontend hardcoded values)
-const FALLBACK_MODELS: &[(&str, &str)] = &[
-    ("claude-sonnet-4-5-20250929", "Claude 4.5 Sonnet"),
-    ("claude-haiku-4-5-20251001", "Claude 4.5 Haiku"),
-    ("claude-opus-4-1-20250805", "Claude 4.1 Opus"),
-    ("claude-sonnet-4-20250514", "Claude 4 Sonnet"),
-];
-
-/// Get fallback models as AnthropicModel vec
-fn get_fallback_models() -> Vec<AnthropicModel> {
-    FALLBACK_MODELS
-        .iter()
-        .map(|(id, name)| AnthropicModel {
-            id: id.to_string(),
-            display_name: Some(name.to_string()),
-        })
-        .collect()
-}
 
 /// Check if model is a chat-capable model
 fn is_chat_model(model_id: &str) -> bool {
@@ -69,23 +51,19 @@ fn is_chat_model(model_id: &str) -> bool {
 /// * `api_key` - Anthropic API key
 ///
 /// # Returns
-/// Vector of available models, or fallback models on error
+/// Vector of available chat models, or an error when the key is missing or the request fails
 #[command]
 pub async fn get_anthropic_models(api_key: Option<String>) -> Result<Vec<AnthropicModel>, String> {
-    // Return fallback if no API key provided
     let api_key = match api_key {
         Some(key) if !key.trim().is_empty() => key.trim().to_string(),
-        _ => {
-            log::info!("No Anthropic API key provided, returning fallback models");
-            return Ok(get_fallback_models());
-        }
+        _ => return Err("API key is required".to_string()),
     };
 
     // Check cache first
     {
         let cache = MODELS_CACHE.read().map_err(|e| e.to_string())?;
         if let Some(entry) = cache.as_ref() {
-            if entry.fetched_at.elapsed() < Duration::from_secs(CACHE_TTL_SECS) {
+            if entry.api_key == api_key && entry.fetched_at.elapsed() < Duration::from_secs(CACHE_TTL_SECS) {
                 log::info!(
                     "Returning cached Anthropic models ({} models)",
                     entry.models.len()
@@ -108,27 +86,16 @@ pub async fn get_anthropic_models(api_key: Option<String>) -> Result<Vec<Anthrop
         .await
     {
         Ok(resp) => resp,
-        Err(e) => {
-            log::warn!("Failed to fetch Anthropic models: {}. Using fallback.", e);
-            return Ok(get_fallback_models());
-        }
+        Err(e) => return Err(format!("Could not reach Claude: {}", e)),
     };
 
     if !response.status().is_success() {
-        let status = response.status();
-        log::warn!(
-            "Anthropic API returned status {}. Using fallback models.",
-            status
-        );
-        return Ok(get_fallback_models());
+        return Err(format!("Claude rejected the request (HTTP {})", response.status()));
     }
 
     let api_response: AnthropicApiResponse = match response.json().await {
         Ok(data) => data,
-        Err(e) => {
-            log::warn!("Failed to parse Anthropic response: {}. Using fallback.", e);
-            return Ok(get_fallback_models());
-        }
+        Err(e) => return Err(format!("Could not read the Claude model list: {}", e)),
     };
 
     // Filter to only chat models and map to our struct
@@ -142,18 +109,13 @@ pub async fn get_anthropic_models(api_key: Option<String>) -> Result<Vec<Anthrop
         })
         .collect();
 
-    // If no models returned, use fallback
-    if models.is_empty() {
-        log::warn!("No chat models returned from Anthropic API. Using fallback.");
-        return Ok(get_fallback_models());
-    }
-
     log::info!("Fetched {} Anthropic models from API", models.len());
 
     // Update cache
     {
         let mut cache = MODELS_CACHE.write().map_err(|e| e.to_string())?;
         *cache = Some(CacheEntry {
+            api_key: api_key.clone(),
             models: models.clone(),
             fetched_at: Instant::now(),
         });

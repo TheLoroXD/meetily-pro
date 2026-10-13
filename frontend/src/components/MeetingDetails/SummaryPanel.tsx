@@ -4,7 +4,7 @@ import { MeetingSummary, Summary, Transcript } from '@/types';
 import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { DuringCallSuggestions } from '@/components/MeetingDetails/DuringCallSuggestions';
-import { ModelConfig } from '@/components/ModelSettingsModal';
+import type { ModelConfig } from '@/services/configService';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
 import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
 import Analytics from '@/lib/analytics';
@@ -39,8 +39,6 @@ interface SummaryPanelProps {
   summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
   transcripts: Transcript[];
   modelConfig: ModelConfig;
-  setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
-  onSaveModelConfig: (config?: ModelConfig) => Promise<void>;
   onGenerateSummary: (customPrompt: string) => Promise<void>;
   onStopGeneration: () => void;
   customPrompt: string;
@@ -69,8 +67,6 @@ export function SummaryPanel({
   summaryStatus,
   transcripts,
   modelConfig,
-  setModelConfig,
-  onSaveModelConfig,
   onGenerateSummary,
   onStopGeneration,
   customPrompt,
@@ -249,9 +245,6 @@ export function SummaryPanel({
         <div className="flex items-center justify-center w-full min-w-0 gap-2 flex-wrap">
           <div className="flex-shrink-0 min-w-0">
             <SummaryGeneratorButtonGroup
-              modelConfig={modelConfig}
-              setModelConfig={setModelConfig}
-              onSaveModelConfig={onSaveModelConfig}
               onGenerateSummary={onGenerateSummary}
               onStopGeneration={onStopGeneration}
               customPrompt={customPrompt}

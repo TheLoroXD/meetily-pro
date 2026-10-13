@@ -27,6 +27,7 @@ struct OpenAIApiResponse {
 
 /// Cache entry for models
 struct CacheEntry {
+    api_key: String,
     models: Vec<OpenAIModel>,
     fetched_at: Instant,
 }
@@ -36,41 +37,6 @@ static MODELS_CACHE: RwLock<Option<CacheEntry>> = RwLock::new(None);
 
 /// Cache TTL in seconds
 const CACHE_TTL_SECS: u64 = 300;
-
-/// Fallback models when API fetch fails (matches frontend hardcoded values)
-const FALLBACK_MODELS: &[&str] = &[
-    "gpt-5",
-    "gpt-5-mini",
-    "gpt-4o",
-    "gpt-4.1",
-    "gpt-4-turbo",
-    "gpt-3.5-turbo",
-    "gpt-4o-2024-11-20",
-    "gpt-4o-2024-08-06",
-    "gpt-4o-mini-2024-07-18",
-    "gpt-4.1-2025-04-14",
-    "gpt-4.1-nano-2025-04-14",
-    "gpt-4.1-mini-2025-04-14",
-    "o4-mini-2025-04-16",
-    "o3-2025-04-16",
-    "o3-mini-2025-01-31",
-    "o1-2024-12-17",
-    "o1-mini-2024-09-12",
-    "gpt-4-turbo-2024-04-09",
-    "gpt-4-0125-Preview",
-    "gpt-4-vision-preview",
-    "gpt-4-1106-Preview",
-    "gpt-3.5-turbo-0125",
-    "gpt-3.5-turbo-1106",
-];
-
-/// Get fallback models as OpenAIModel vec
-fn get_fallback_models() -> Vec<OpenAIModel> {
-    FALLBACK_MODELS
-        .iter()
-        .map(|id| OpenAIModel { id: id.to_string() })
-        .collect()
-}
 
 /// Check if model is a chat-capable model (filter out embedding, tts, etc.)
 fn is_chat_model(model_id: &str) -> bool {
@@ -99,23 +65,19 @@ fn is_chat_model(model_id: &str) -> bool {
 /// * `api_key` - OpenAI API key
 ///
 /// # Returns
-/// Vector of available models, or fallback models on error
+/// Vector of available chat models, or an error when the key is missing or the request fails
 #[command]
 pub async fn get_openai_models(api_key: Option<String>) -> Result<Vec<OpenAIModel>, String> {
-    // Return fallback if no API key provided
     let api_key = match api_key {
         Some(key) if !key.trim().is_empty() => key.trim().to_string(),
-        _ => {
-            log::info!("No OpenAI API key provided, returning fallback models");
-            return Ok(get_fallback_models());
-        }
+        _ => return Err("API key is required".to_string()),
     };
 
     // Check cache first
     {
         let cache = MODELS_CACHE.read().map_err(|e| e.to_string())?;
         if let Some(entry) = cache.as_ref() {
-            if entry.fetched_at.elapsed() < Duration::from_secs(CACHE_TTL_SECS) {
+            if entry.api_key == api_key && entry.fetched_at.elapsed() < Duration::from_secs(CACHE_TTL_SECS) {
                 log::info!("Returning cached OpenAI models ({} models)", entry.models.len());
                 return Ok(entry.models.clone());
             }
@@ -134,27 +96,16 @@ pub async fn get_openai_models(api_key: Option<String>) -> Result<Vec<OpenAIMode
         .await
     {
         Ok(resp) => resp,
-        Err(e) => {
-            log::warn!("Failed to fetch OpenAI models: {}. Using fallback.", e);
-            return Ok(get_fallback_models());
-        }
+        Err(e) => return Err(format!("Could not reach OpenAI: {}", e)),
     };
 
     if !response.status().is_success() {
-        let status = response.status();
-        log::warn!(
-            "OpenAI API returned status {}. Using fallback models.",
-            status
-        );
-        return Ok(get_fallback_models());
+        return Err(format!("OpenAI rejected the request (HTTP {})", response.status()));
     }
 
     let api_response: OpenAIApiResponse = match response.json().await {
         Ok(data) => data,
-        Err(e) => {
-            log::warn!("Failed to parse OpenAI response: {}. Using fallback.", e);
-            return Ok(get_fallback_models());
-        }
+        Err(e) => return Err(format!("Could not read the OpenAI model list: {}", e)),
     };
 
     // Filter to only chat models and map to our struct
@@ -165,18 +116,13 @@ pub async fn get_openai_models(api_key: Option<String>) -> Result<Vec<OpenAIMode
         .map(|m| OpenAIModel { id: m.id })
         .collect();
 
-    // If no models returned (e.g., restricted API key), use fallback
-    if models.is_empty() {
-        log::warn!("No chat models returned from OpenAI API. Using fallback.");
-        return Ok(get_fallback_models());
-    }
-
     log::info!("Fetched {} OpenAI models from API", models.len());
 
     // Update cache
     {
         let mut cache = MODELS_CACHE.write().map_err(|e| e.to_string())?;
         *cache = Some(CacheEntry {
+            api_key: api_key.clone(),
             models: models.clone(),
             fetched_at: Instant::now(),
         });

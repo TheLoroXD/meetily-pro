@@ -27,7 +27,6 @@ pub enum OllamaError {
     NetworkError(String),
     InvalidEndpoint(String),
     ServerError(String),
-    NoModelsFound,
     ParseError(String),
 }
 
@@ -38,7 +37,6 @@ impl std::fmt::Display for OllamaError {
             OllamaError::NetworkError(msg) => write!(f, "Network error: {}. Please check your connection and endpoint URL.", msg),
             OllamaError::InvalidEndpoint(msg) => write!(f, "Invalid endpoint: {}. Please check the URL format.", msg),
             OllamaError::ServerError(msg) => write!(f, "Ollama server error: {}", msg),
-            OllamaError::NoModelsFound => write!(f, "No models found on the Ollama server. Please pull models using 'ollama pull <model>'."),
             OllamaError::ParseError(msg) => write!(f, "Failed to parse server response: {}", msg),
         }
     }
@@ -107,13 +105,7 @@ pub async fn get_ollama_models(endpoint: Option<String>) -> Result<Vec<OllamaMod
         Duration::from_secs(5),
         get_models_via_http_with_retry(endpoint.as_deref())
     ).await {
-        Ok(Ok(models)) => {
-            if models.is_empty() {
-                Err(OllamaError::NoModelsFound.to_string())
-            } else {
-                Ok(models)
-            }
-        }
+        Ok(Ok(models)) => Ok(models),
         Ok(Err(http_err)) => {
             // Only fallback to CLI if endpoint is localhost/empty
             if is_localhost_endpoint(endpoint.as_deref()) {
@@ -228,10 +220,6 @@ fn get_models_via_cli() -> Result<Vec<OllamaModel>, String> {
                 modified: parts[4..].join(" "),
             });
         }
-    }
-
-    if models.is_empty() {
-        return Err(OllamaError::NoModelsFound.to_string());
     }
 
     Ok(models)

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Button } from '@/components/ui/button';
@@ -29,37 +29,24 @@ interface DownloadProgressInfo {
   speedMbps: number;
 }
 
-interface BuiltInModelManagerProps {
-  selectedModel: string;
-  onModelSelect: (model: string) => void;
-  layout?: 'inline' | 'dialog';
-}
-
-export function BuiltInModelManager({
-  selectedModel,
-  onModelSelect,
-  layout = 'inline',
-}: BuiltInModelManagerProps) {
+export function BuiltInModelManager({ onModelsChange }: { onModelsChange?: () => void }) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [hasFetched, setHasFetched] = useState<boolean>(false);
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   const [downloadProgressInfo, setDownloadProgressInfo] = useState<Record<string, DownloadProgressInfo>>({});
   const [downloadingModels, setDownloadingModels] = useState<Set<string>>(new Set());
+  const onModelsChangeRef = useRef(onModelsChange);
+
+  useEffect(() => {
+    onModelsChangeRef.current = onModelsChange;
+  }, [onModelsChange]);
 
   const fetchModels = async () => {
     try {
       setIsLoading(true);
       const data = (await invoke('builtin_ai_list_models')) as ModelInfo[];
       setModels(data);
-
-      // Auto-select first available model if none selected
-      if (data.length > 0 && !selectedModel) {
-        const firstAvailable = data.find((m) => m.status.type === 'available');
-        if (firstAvailable) {
-          onModelSelect(firstAvailable.name);
-        }
-      }
     } catch (error) {
       console.error('Failed to fetch built-in AI models:', error);
       toast.error('Failed to load models');
@@ -148,6 +135,7 @@ export function BuiltInModelManager({
           });
           // Refresh models list
           fetchModels();
+          onModelsChangeRef.current?.();
         }
 
         // Handle error status
@@ -248,6 +236,7 @@ export function BuiltInModelManager({
       await invoke('builtin_ai_delete_model', { modelName });
       toast.success(`Model ${modelName} deleted`);
       fetchModels();
+      onModelsChangeRef.current?.();
     } catch (error) {
       console.error('Failed to delete model:', error);
       toast.error(`Failed to delete ${modelName}`);
@@ -281,12 +270,7 @@ export function BuiltInModelManager({
         <h4 className="text-sm font-bold">Built-in AI Models</h4>
       </div>
 
-      <div
-        className={cn(
-          'grid gap-4',
-          layout === 'dialog' && 'max-h-[50vh] overflow-y-auto pr-2 pb-2'
-        )}
-      >
+      <div className="grid gap-4">
         {models.map((model) => {
           const progress = downloadProgress[model.name];
           const progressInfo = downloadProgressInfo[model.name];
@@ -304,16 +288,8 @@ export function BuiltInModelManager({
                 modelIsDownloading
                   ? 'bg-white border-gray-200'
                   : 'bg-card',
-                selectedModel === model.name
-                  ? 'ring-2 ring-gray-800 border-gray-800'
-                  : 'border-gray-200 hover:border-gray-300',
-                isAvailable && !modelIsDownloading && 'cursor-pointer'
+                'border-gray-200 hover:border-gray-300'
               )}
-              onClick={() => {
-                if (isAvailable && !modelIsDownloading) {
-                  onModelSelect(model.name);
-                }
-              }}
             >
             <div className="space-y-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -321,17 +297,10 @@ export function BuiltInModelManager({
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="min-w-0 break-words text-base font-bold leading-snug text-gray-900">{model.display_name || model.name}</span>
                     {isAvailable && (
-                      <>
-                        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-green-600">
-                          <span className="h-2 w-2 rounded-full bg-green-600"></span>
-                          Ready
-                        </span>
-                        {selectedModel === model.name && (
-                          <span className="shrink-0 rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                            Selected
-                          </span>
-                        )}
-                      </>
+                      <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-green-600">
+                        <span className="h-2 w-2 rounded-full bg-green-600"></span>
+                        Ready
+                      </span>
                     )}
                     {isCorrupted && (
                       <span className="flex shrink-0 items-center gap-1 rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
@@ -418,8 +387,8 @@ export function BuiltInModelManager({
                       </Button>
                     </>
                   )}
-                  {/* Available - Show small trash icon (only if not currently selected) */}
-                  {isAvailable && !modelIsDownloading && selectedModel !== model.name && (
+                  {/* Available - Show small trash icon */}
+                  {isAvailable && !modelIsDownloading && (
                     <button
                       className="p-2 rounded hover:bg-gray-100 transition-colors text-gray-500 hover:text-red-600"
                       onClick={(e) => {

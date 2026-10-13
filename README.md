@@ -32,6 +32,12 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 
 ## What's new
 
+### v1.2.0
+
+- One Models page in Settings: add your AI services and download models in one place.
+- Pick the voice, summary and assistant models separately, from the ones that work right now.
+- Your saved keys, server addresses and downloaded models carry over.
+
 ### v1.1.0
 
 - The assistant is on from the start, and a bar shows when its next tip is coming. Press refresh to get one right away.
@@ -44,12 +50,6 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 - A new assistant next to the live transcript suggests questions to ask and things to clarify, each linked to where it was said.
 - Pin the useful suggestions to include them in the meeting summary.
 - Ready-to-install downloads for Mac and Linux.
-
-### v0.4.1 (upstream)
-
-- More accurate live transcription with fewer made-up lines.
-- Bluetooth microphones on Mac work more reliably.
-- Better summaries of long meetings.
 
 ## Roadmap
 

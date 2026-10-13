@@ -3,18 +3,6 @@ use crate::summary::CustomOpenAIConfig;
 use sqlx::SqlitePool;
 
 #[derive(serde::Deserialize, Debug)]
-pub struct SaveModelConfigRequest {
-    pub provider: String,
-    pub model: String,
-    #[serde(rename = "whisperModel")]
-    pub whisper_model: String,
-    #[serde(rename = "apiKey")]
-    pub api_key: Option<String>,
-    #[serde(rename = "ollamaEndpoint")]
-    pub ollama_endpoint: Option<String>,
-}
-
-#[derive(serde::Deserialize, Debug)]
 pub struct SaveTranscriptConfigRequest {
     pub provider: String,
     pub model: String,
@@ -38,29 +26,41 @@ impl SettingsRepository {
         Ok(setting)
     }
 
-    pub async fn save_model_config(
+    pub async fn save_summary_model(
         pool: &SqlitePool,
         provider: &str,
         model: &str,
-        whisper_model: &str,
-        ollama_endpoint: Option<&str>,
     ) -> std::result::Result<(), sqlx::Error> {
-        // Using id '1' for backward compatibility
         sqlx::query(
             r#"
-            INSERT INTO settings (id, provider, model, whisperModel, ollamaEndpoint)
-            VALUES ('1', $1, $2, $3, $4)
+            INSERT INTO settings (id, provider, model, whisperModel)
+            VALUES ('1', $1, $2, 'large-v3')
             ON CONFLICT(id) DO UPDATE SET
                 provider = excluded.provider,
-                model = excluded.model,
-                whisperModel = excluded.whisperModel,
-                ollamaEndpoint = excluded.ollamaEndpoint
+                model = excluded.model
             "#,
         )
         .bind(provider)
         .bind(model)
-        .bind(whisper_model)
-        .bind(ollama_endpoint)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn save_ollama_endpoint(
+        pool: &SqlitePool,
+        endpoint: Option<&str>,
+    ) -> std::result::Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO settings (id, provider, model, whisperModel, ollamaEndpoint)
+            VALUES ('1', 'builtin-ai', '', 'large-v3', $1)
+            ON CONFLICT(id) DO UPDATE SET
+                ollamaEndpoint = excluded.ollamaEndpoint
+            "#,
+        )
+        .bind(endpoint)
         .execute(pool)
         .await?;
 
@@ -96,7 +96,7 @@ impl SettingsRepository {
         let query = format!(
             r#"
             INSERT INTO settings (id, provider, model, whisperModel, "{}")
-            VALUES ('1', 'openai', 'gpt-4o-2024-11-20', 'large-v3', $1)
+            VALUES ('1', 'builtin-ai', '', 'large-v3', $1)
             ON CONFLICT(id) DO UPDATE SET
                 "{}" = $1
             "#,
@@ -333,16 +333,124 @@ impl SettingsRepository {
         sqlx::query(
             r#"
             INSERT INTO settings (id, provider, model, whisperModel, customOpenAIConfig)
-            VALUES ('1', 'custom-openai', $1, 'large-v3', $2)
+            VALUES ('1', 'builtin-ai', '', 'large-v3', $1)
             ON CONFLICT(id) DO UPDATE SET
-                customOpenAIConfig = excluded.customOpenAIConfig
+                customOpenAIConfig = excluded.customOpenAIConfig,
+                model = CASE WHEN provider = 'custom-openai' THEN $2 ELSE model END
             "#,
         )
-        .bind(&config.model)
         .bind(config_json)
+        .bind(&config.model)
         .execute(pool)
         .await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    fn custom(model: &str) -> CustomOpenAIConfig {
+        CustomOpenAIConfig {
+            endpoint: "http://box:8080/v1".to_string(),
+            api_key: None,
+            model: model.to_string(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn saving_a_key_on_empty_db_does_not_select_that_provider() {
+        let pool = pool().await;
+        SettingsRepository::save_api_key(&pool, "openai", "sk-1").await.unwrap();
+        let s = SettingsRepository::get_model_config(&pool).await.unwrap().unwrap();
+        assert_eq!(s.provider, "builtin-ai");
+        assert_eq!(
+            SettingsRepository::get_api_key(&pool, "openai").await.unwrap().as_deref(),
+            Some("sk-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn saving_the_summary_model_on_empty_db_creates_the_row() {
+        let pool = pool().await;
+        SettingsRepository::save_summary_model(&pool, "builtin-ai", "gemma3:1b").await.unwrap();
+        let s = SettingsRepository::get_model_config(&pool).await.unwrap().unwrap();
+        assert_eq!((s.provider.as_str(), s.model.as_str(), s.ollama_endpoint), ("builtin-ai", "gemma3:1b", None));
+    }
+
+    #[tokio::test]
+    async fn saving_a_key_keeps_the_summary_model() {
+        let pool = pool().await;
+        SettingsRepository::save_summary_model(&pool, "ollama", "gemma3:1b").await.unwrap();
+        SettingsRepository::save_api_key(&pool, "claude", "sk-ant").await.unwrap();
+        let s = SettingsRepository::get_model_config(&pool).await.unwrap().unwrap();
+        assert_eq!((s.provider.as_str(), s.model.as_str()), ("ollama", "gemma3:1b"));
+    }
+
+    #[tokio::test]
+    async fn saving_the_summary_model_keeps_endpoint_and_keys() {
+        let pool = pool().await;
+        SettingsRepository::save_ollama_endpoint(&pool, Some("http://gpu:11434")).await.unwrap();
+        SettingsRepository::save_api_key(&pool, "groq", "gsk").await.unwrap();
+        SettingsRepository::save_summary_model(&pool, "claude", "claude-sonnet-4-5").await.unwrap();
+        let s = SettingsRepository::get_model_config(&pool).await.unwrap().unwrap();
+        assert_eq!(s.ollama_endpoint.as_deref(), Some("http://gpu:11434"));
+        assert_eq!(
+            SettingsRepository::get_api_key(&pool, "groq").await.unwrap().as_deref(),
+            Some("gsk")
+        );
+    }
+
+    #[tokio::test]
+    async fn saving_the_endpoint_keeps_the_summary_model() {
+        let pool = pool().await;
+        SettingsRepository::save_summary_model(&pool, "openai", "gpt-4o").await.unwrap();
+        SettingsRepository::save_ollama_endpoint(&pool, None).await.unwrap();
+        let s = SettingsRepository::get_model_config(&pool).await.unwrap().unwrap();
+        assert_eq!((s.provider.as_str(), s.model.as_str()), ("openai", "gpt-4o"));
+        assert_eq!(s.ollama_endpoint, None);
+    }
+
+    #[tokio::test]
+    async fn custom_server_model_follows_config_only_when_selected() {
+        let pool = pool().await;
+        SettingsRepository::save_summary_model(&pool, "openai", "gpt-4o").await.unwrap();
+        SettingsRepository::save_custom_openai_config(&pool, &custom("llama3")).await.unwrap();
+        let s = SettingsRepository::get_model_config(&pool).await.unwrap().unwrap();
+        assert_eq!((s.provider.as_str(), s.model.as_str()), ("openai", "gpt-4o"));
+
+        SettingsRepository::save_summary_model(&pool, "custom-openai", "llama3").await.unwrap();
+        SettingsRepository::save_custom_openai_config(&pool, &custom("qwen3")).await.unwrap();
+        let s = SettingsRepository::get_model_config(&pool).await.unwrap().unwrap();
+        assert_eq!((s.provider.as_str(), s.model.as_str()), ("custom-openai", "qwen3"));
+    }
+
+    #[tokio::test]
+    async fn deleting_a_key_keeps_others() {
+        let pool = pool().await;
+        SettingsRepository::save_api_key(&pool, "openai", "sk-1").await.unwrap();
+        SettingsRepository::save_api_key(&pool, "claude", "sk-ant").await.unwrap();
+        SettingsRepository::delete_api_key(&pool, "openai").await.unwrap();
+        assert!(SettingsRepository::get_api_key(&pool, "openai").await.unwrap().unwrap_or_default().is_empty());
+        assert_eq!(
+            SettingsRepository::get_api_key(&pool, "claude").await.unwrap().as_deref(),
+            Some("sk-ant")
+        );
     }
 }

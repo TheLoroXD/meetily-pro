@@ -179,13 +179,7 @@ pub async fn complete_onboarding<R: Runtime>(
     let pool = state.db_manager.pool();
 
     // Onboarding always uses builtin-ai (local LLM)
-    if let Err(e) = SettingsRepository::save_model_config(
-        pool,
-        "builtin-ai",
-        &model,
-        "large-v3",
-        None,
-    ).await {
+    if let Err(e) = SettingsRepository::save_summary_model(pool, "builtin-ai", &model).await {
         error!("Failed to save builtin-ai model config: {}", e);
         return Err(format!("Failed to save builtin-ai model config: {}", e));
     }
