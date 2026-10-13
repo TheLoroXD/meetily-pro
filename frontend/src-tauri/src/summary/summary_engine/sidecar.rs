@@ -52,6 +52,8 @@ pub struct SidecarManager {
 
     /// Idle timeout in seconds (configurable via env var)
     idle_timeout_secs: u64,
+
+    request_lock: Arc<Mutex<()>>,
 }
 
 /// RAII guard for tracking active requests
@@ -101,7 +103,16 @@ impl SidecarManager {
             helper_binary_path,
             current_model_path: Arc::new(RwLock::new(None)),
             idle_timeout_secs,
+            request_lock: Arc::new(Mutex::new(())),
         })
+    }
+
+    pub fn active_requests(&self) -> usize {
+        self.active_request_count.load(Ordering::SeqCst)
+    }
+
+    pub async fn request_slot(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.request_lock.clone().lock_owned().await
     }
 
     /// Resolve the path to llama-helper binary
@@ -566,6 +577,7 @@ impl SidecarManager {
             helper_binary_path: self.helper_binary_path.clone(),
             current_model_path: self.current_model_path.clone(),
             idle_timeout_secs: self.idle_timeout_secs,
+            request_lock: self.request_lock.clone(),
         };
 
         tokio::spawn(async move {
@@ -614,6 +626,7 @@ impl SidecarManager {
             helper_binary_path: self.helper_binary_path.clone(),
             current_model_path: self.current_model_path.clone(),
             idle_timeout_secs: self.idle_timeout_secs,
+            request_lock: self.request_lock.clone(),
         };
 
         tokio::spawn(async move {

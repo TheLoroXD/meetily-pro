@@ -37,6 +37,7 @@ pub(crate) use perf_trace;
 // Declare audio module
 pub mod analytics;
 pub mod api;
+pub mod assistant;
 pub mod audio;
 pub mod config;
 pub mod console_utils;
@@ -474,6 +475,7 @@ pub fn run() {
         )) as NotificationManagerState<tauri::Wry>)
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
+        .manage(assistant::AssistantState::default())
         .setup(|_app| {
             #[cfg(target_os = "windows")]
             match _app.path().resolve(
@@ -696,6 +698,17 @@ pub fn run() {
             // Reload sync commands (retrieve transcript history and meeting name)
             audio::recording_commands::get_transcript_history,
             audio::recording_commands::get_recording_meeting_name,
+            assistant::commands::start_live_assistant,
+            assistant::commands::refresh_live_assistant,
+            assistant::commands::pause_live_assistant,
+            assistant::commands::set_live_assistant_goal,
+            assistant::commands::update_live_suggestion,
+            assistant::commands::get_live_assistant_state,
+            assistant::commands::api_get_assistant_settings,
+            assistant::commands::api_save_assistant_settings,
+            assistant::commands::api_get_meeting_suggestions,
+            assistant::commands::api_save_meeting_suggestions,
+            assistant::commands::api_import_assistant_snapshot,
             // Playback device detection (Bluetooth warning)
             audio::recording_commands::get_active_audio_output,
             // Audio recovery commands (for transcript recovery feature)

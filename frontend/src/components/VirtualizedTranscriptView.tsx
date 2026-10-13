@@ -63,6 +63,8 @@ function cleanStopWords(text: string): string {
     return cleanedText.replace(/\s+/g, ' ').trim();
 }
 
+export const SCROLL_TO_SEGMENT_EVENT = 'meetily:scroll-to-segment';
+
 // Memoized transcript segment component
 const TranscriptSegment = memo(function TranscriptSegment({
     id,
@@ -71,6 +73,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence,
     isStreaming,
     showConfidence,
+    highlighted = false,
 }: {
     id: string;
     timestamp: number;
@@ -78,11 +81,12 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence?: number;
     isStreaming: boolean;
     showConfidence: boolean;
+    highlighted?: boolean;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
 
     return (
-        <div id={`segment-${id}`} className="mb-3">
+        <div id={`segment-${id}`} className={`mb-3 rounded-md transition-colors ${highlighted ? 'bg-yellow-50 ring-1 ring-yellow-200' : ''}`}>
             <div className="flex items-start gap-2">
                 <Tooltip>
                     <TooltipTrigger>
@@ -146,6 +150,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         },
     });
 
+    const [highlightedId, setHighlightedId] = useState<string | null>(null);
+    const segmentsRef = useRef(segments);
+    segmentsRef.current = segments;
+
     // Custom hook for auto-scrolling (supports both virtualized and non-virtualized)
     useAutoScroll({
         scrollRef,
@@ -154,6 +162,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         isPaused,
         virtualizer,
         virtualizationThreshold: VIRTUALIZATION_THRESHOLD,
+        activeSegmentId: highlightedId ?? undefined,
         disableAutoScroll,
     });
 
@@ -163,6 +172,32 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         isRecording,
         enableStreaming
     );
+
+    useEffect(() => {
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const handler = (event: Event) => {
+            const atSeconds = (event as CustomEvent<{ atSeconds: number }>).detail?.atSeconds;
+            const current = segmentsRef.current;
+            if (typeof atSeconds !== 'number' || current.length === 0) return;
+            let index = 0;
+            let best = Number.POSITIVE_INFINITY;
+            current.forEach((segment, i) => {
+                const distance = Math.abs((segment.timestamp ?? 0) - atSeconds);
+                if (distance < best) {
+                    best = distance;
+                    index = i;
+                }
+            });
+            setHighlightedId(current[index].id);
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => setHighlightedId(null), 2500);
+        };
+        window.addEventListener(SCROLL_TO_SEGMENT_EVENT, handler);
+        return () => {
+            window.removeEventListener(SCROLL_TO_SEGMENT_EVENT, handler);
+            if (timer) clearTimeout(timer);
+        };
+    }, []);
 
     // Infinite scroll: IntersectionObserver to trigger loading more
     useEffect(() => {
@@ -296,6 +331,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        highlighted={highlightedId === segment.id}
                                     />
                                 </div>
                             );
@@ -352,6 +388,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        highlighted={highlightedId === segment.id}
                                     />
                                 </motion.div>
                             );

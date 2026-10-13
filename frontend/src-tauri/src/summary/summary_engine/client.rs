@@ -119,6 +119,13 @@ fn get_cached_model_path(app_data_dir: &PathBuf, model_name: &str) -> Result<Pat
 // Public API
 // ============================================================================
 
+pub async fn is_sidecar_busy() -> bool {
+    let global_manager = SIDECAR_MANAGER.lock().await;
+    global_manager
+        .as_ref()
+        .is_some_and(|manager| manager.active_requests() > 0)
+}
+
 /// Generate text using built-in AI
 ///
 /// # Arguments
@@ -135,6 +142,7 @@ pub async fn generate_with_builtin(
     model_name: &str,
     system_prompt: &str,
     user_prompt: &str,
+    max_tokens: Option<i32>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<String> {
     // Check cancellation at start
@@ -168,6 +176,16 @@ pub async fn generate_with_builtin(
         global_manager.clone().unwrap()
     };
 
+    let _slot = match cancellation_token {
+        Some(token) => tokio::select! {
+            slot = manager.request_slot() => slot,
+            _ = token.cancelled() => {
+                return Err(anyhow!("Generation cancelled while waiting for the model"));
+            }
+        },
+        None => manager.request_slot().await,
+    };
+
     // Ensure sidecar is running with this model
     manager.ensure_running(model_path.clone()).await?;
 
@@ -182,7 +200,7 @@ pub async fn generate_with_builtin(
     let sampling = model_def.sampling.sanitize_for_llama_helper();
     let request = Request::Generate {
         prompt: formatted_prompt,
-        max_tokens: Some(models::DEFAULT_MAX_TOKENS),
+        max_tokens: Some(max_tokens.unwrap_or(models::DEFAULT_MAX_TOKENS)),
         context_size: Some(model_def.context_size),
         model_path: Some(model_path.to_string_lossy().to_string()),
         temperature: Some(sampling.temperature),

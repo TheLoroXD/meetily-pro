@@ -41,7 +41,13 @@ export function About() {
             }
         } catch (error: any) {
             console.error('Failed to check for updates:', error);
-            toast.error('Failed to check for updates: ' + (error.message || 'Unknown error'));
+            toast.error('Could not check for updates automatically', {
+                description: 'Download the latest version from the Releases page.',
+                action: {
+                    label: 'Open Releases',
+                    onClick: () => invoke('open_external_url', { url: 'https://github.com/asidko/meetily/releases/latest' }),
+                },
+            });
         } finally {
             setIsChecking(false);
         }

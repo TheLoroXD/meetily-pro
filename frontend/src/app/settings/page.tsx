@@ -8,6 +8,7 @@ import { motion } from 'framer-motion';
 import { TranscriptSettings } from '@/components/TranscriptSettings';
 import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
+import { AssistantSettings } from '@/components/AssistantSettings';
 import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { BetaSettings } from '@/components/BetaSettings';
 import { useConfig } from '@/contexts/ConfigContext';
@@ -123,6 +124,9 @@ export default function SettingsPage() {
             </TabsContent>
             <TabsContent value="summaryModels">
               <SummaryModelSettings />
+              <div className="mt-6">
+                <AssistantSettings />
+              </div>
             </TabsContent>
             <TabsContent value="beta" className="mt-6">
               <BetaSettings />

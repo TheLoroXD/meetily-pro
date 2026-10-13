@@ -530,6 +530,10 @@ impl RecordingManager {
         self.recording_saver.get_transcript_segments()
     }
 
+    pub fn transcript_progress(&self, after_seq: Option<u64>) -> (Option<u64>, usize) {
+        self.recording_saver.transcript_progress(after_seq)
+    }
+
     /// Get meeting name from current recording session
     /// Used for syncing frontend state after page reload during active recording
     pub fn get_meeting_name(&self) -> Option<String> {

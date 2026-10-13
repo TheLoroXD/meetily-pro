@@ -18,6 +18,18 @@ import {
   readCachedDetectedSummaryLanguage,
 } from '@/lib/summary-language-preferences';
 import { parseSummaryContent, readSummaryMetadata } from '@/lib/summary-content';
+import { appendPinnedSection, buildPinnedPromptSection } from '@/lib/live-assistant';
+import { assistantService } from '@/services/assistantService';
+
+async function withPinnedSuggestions(meetingId: string, customPrompt: string): Promise<string> {
+  try {
+    const suggestions = await assistantService.getMeetingSuggestions(meetingId);
+    return appendPinnedSection(customPrompt, buildPinnedPromptSection(suggestions));
+  } catch (error) {
+    console.warn('Failed to load pinned suggestions for summary:', error);
+    return customPrompt;
+  }
+}
 
 async function resolveSummaryLanguage(
   meetingId: string,
@@ -357,6 +369,7 @@ export function useSummaryGeneration({
         meeting.id,
         transcriptTexts?.length ? transcriptTexts : [transcriptText],
       );
+      const promptWithPinned = await withPinnedSuggestions(meeting.id, customPrompt);
       if (!mountedRef.current || visibleMeetingIdRef.current !== meeting.id || generationId !== generationIdRef.current) {
         return;
       }
@@ -368,7 +381,7 @@ export function useSummaryGeneration({
         meetingId: meeting.id,
         chunkSize: 40000,
         overlap: 1000,
-        customPrompt,
+        customPrompt: promptWithPinned,
         templateId: selectedTemplate,
         summaryLanguage,
       });

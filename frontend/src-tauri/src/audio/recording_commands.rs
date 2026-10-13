@@ -473,6 +473,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         "devices": ["Default Microphone", "Default System Audio"],
         "workers": 3
     })).map_err(|e| e.to_string())?;
+    crate::assistant::service::on_recording_started(&app);
 
     // Update tray menu to reflect recording state
     crate::tray::update_tray_menu(&app);
@@ -663,6 +664,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         ],
         "workers": 3
     })).map_err(|e| e.to_string())?;
+    crate::assistant::service::on_recording_started(&app);
 
     // Update tray menu to reflect recording state
     crate::tray::update_tray_menu(&app);
@@ -686,6 +688,8 @@ pub async fn stop_recording<R: Runtime>(
         info!("Recording was not active");
         return Ok(());
     }
+
+    crate::assistant::service::stop(&app);
 
     // Emit shutdown progress to frontend
     let _ = app.emit(
@@ -1229,6 +1233,49 @@ pub async fn get_meeting_folder_path() -> Result<Option<String>, String> {
     } else {
         Ok(None)
     }
+}
+
+pub struct LiveTranscriptSnapshot {
+    pub segments: Vec<crate::audio::recording_saver::TranscriptSegment>,
+    pub is_paused: bool,
+    pub meeting_folder: Option<std::path::PathBuf>,
+    pub meeting_name: Option<String>,
+}
+
+pub struct LiveTranscriptProgress {
+    pub newest_seq: Option<u64>,
+    pub new_words: usize,
+    pub is_paused: bool,
+    pub meeting_folder: Option<std::path::PathBuf>,
+}
+
+pub fn live_transcript_progress(after_seq: Option<u64>) -> Option<LiveTranscriptProgress> {
+    if !recording_live() {
+        return None;
+    }
+    let manager_guard = RECORDING_MANAGER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let manager = manager_guard.as_ref()?;
+    let (newest_seq, new_words) = manager.transcript_progress(after_seq);
+    Some(LiveTranscriptProgress {
+        newest_seq,
+        new_words,
+        is_paused: manager.is_paused(),
+        meeting_folder: manager.get_meeting_folder(),
+    })
+}
+
+pub fn live_transcript_snapshot() -> Option<LiveTranscriptSnapshot> {
+    if !recording_live() {
+        return None;
+    }
+    let manager_guard = RECORDING_MANAGER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let manager = manager_guard.as_ref()?;
+    Some(LiveTranscriptSnapshot {
+        segments: manager.get_transcript_segments(),
+        is_paused: manager.is_paused(),
+        meeting_folder: manager.get_meeting_folder(),
+        meeting_name: manager.get_meeting_name(),
+    })
 }
 
 /// Get accumulated transcript segments from current recording session
