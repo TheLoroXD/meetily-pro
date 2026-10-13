@@ -9,15 +9,16 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
-use super::prompt::{self, ModelOutput, PromptContext, Suggestion};
+use super::prompt::{self, ChatMessage, ChatRole, ModelOutput, PromptContext, Suggestion};
 use super::settings::{self, AssistantSettings};
 use crate::audio::recording_commands::{live_transcript_progress, live_transcript_snapshot, LiveTranscriptSnapshot};
 use crate::audio::recording_saver::TranscriptSegment;
+use crate::audio::transcription::hold_transcription;
 use crate::database::repositories::setting::SettingsRepository;
 use crate::state::AppState;
 use crate::summary::language_detection::detect_summary_language;
 use crate::summary::llm_client::{complete, CompletionOptions, LLMProvider};
-use crate::summary::processor::{language_name_from_code, rough_token_count};
+use crate::summary::processor::{clean_llm_markdown_detailed, language_name_from_code, require_visible_markdown, rough_token_count};
 use crate::summary::service::{resolve_provider_settings, ProviderSettings, METADATA_CACHE};
 use crate::summary::summary_engine::client::is_sidecar_busy;
 
@@ -38,8 +39,13 @@ const OLLAMA_HEADROOM_TOKENS: usize = 800;
 const OLLAMA_FALLBACK_CONTEXT: usize = 4096;
 const MAX_ERROR_CHARS: usize = 160;
 const MAX_DISMISSED_IN_PROMPT: usize = 20;
-const HTTP_TICK_TIMEOUT: Duration = Duration::from_secs(120);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+const CHAT_OUTPUT_TOKENS: u32 = 500;
+const MAX_CHAT_HISTORY: usize = 12;
+const MAX_QUESTION_CHARS: usize = 2000;
 const SNAPSHOT_FILE: &str = "suggestions.json";
+
+static HTTP_CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(reqwest::Client::new);
 
 static PROVIDER_STATUS: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new(r"failed with status (\d{3}[^:]*)").unwrap());
@@ -58,15 +64,17 @@ pub enum AssistantStatus {
 pub struct LiveAssistantState {
     pub active: bool,
     pub status: AssistantStatus,
-    pub goal: String,
     pub provider: String,
     pub model: String,
     pub is_cloud: bool,
     pub last_tick_at: Option<String>,
     pub error: Option<String>,
     pub tick_no: u32,
+    pub progress: u8,
     pub state: String,
     pub suggestions: Vec<Suggestion>,
+    pub chat: Vec<ChatMessage>,
+    pub chat_pending: bool,
 }
 
 pub struct TriggerInput {
@@ -84,6 +92,24 @@ pub struct TriggerInput {
 pub fn content_due(input: &TriggerInput) -> bool {
     input.new_words >= MIN_NEW_WORDS
         || (input.since_last_tick >= SLOW_TICK_AFTER && input.new_words >= SLOW_TICK_MIN_WORDS)
+}
+
+pub fn next_tick_progress(input: &TriggerInput) -> u8 {
+    let content = if input.pending {
+        1.0
+    } else {
+        let words = input.new_words as f32;
+        let by_words = words / MIN_NEW_WORDS as f32;
+        let slow = (words / SLOW_TICK_MIN_WORDS as f32)
+            .min(input.since_last_tick.as_secs_f32() / SLOW_TICK_AFTER.as_secs_f32());
+        by_words.max(slow)
+    };
+    let floor = if input.has_ticked && !input.floor.is_zero() {
+        input.since_last_tick.as_secs_f32() / input.floor.as_secs_f32()
+    } else {
+        1.0
+    };
+    (content.min(floor).clamp(0.0, 1.0) * 100.0).floor() as u8
 }
 
 pub fn tick_due(input: &TriggerInput) -> bool {
@@ -110,11 +136,14 @@ pub fn tick_floor(builtin: bool, last_duration: Duration, failures: u32) -> Dura
 }
 
 struct SessionData {
-    goal: String,
     state_text: String,
     suggestions: Vec<Suggestion>,
     next_id: u64,
+    chat: Vec<ChatMessage>,
+    chat_pending: bool,
+    chat_inflight: Option<CancellationToken>,
     tick_no: u32,
+    progress: u8,
     status: AssistantStatus,
     paused: bool,
     manual_requested: bool,
@@ -139,14 +168,17 @@ struct SessionData {
 }
 
 impl SessionData {
-    fn new(goal: String) -> Self {
+    fn new() -> Self {
         let now = Instant::now();
         Self {
-            goal,
             state_text: String::new(),
             suggestions: Vec::new(),
             next_id: 0,
+            chat: Vec::new(),
+            chat_pending: false,
+            chat_inflight: None,
             tick_no: 0,
+            progress: 0,
             status: AssistantStatus::Waiting,
             paused: false,
             manual_requested: false,
@@ -171,6 +203,24 @@ impl SessionData {
         }
     }
 
+    fn push_chat(&mut self, role: ChatRole, text: String, error: bool) {
+        let id = format!("c{}", self.chat.len() + 1);
+        self.chat.push(ChatMessage { id, role, text, error });
+    }
+
+    fn pause_for_consent(&mut self) {
+        self.paused = true;
+        self.pending = false;
+        self.status = AssistantStatus::Paused;
+    }
+
+    fn fail_setup(&mut self, error: &str) {
+        self.status = AssistantStatus::Error;
+        self.paused = true;
+        self.error = Some(short_error(error));
+        self.pending = false;
+    }
+
     fn settle_status(&mut self) {
         self.status = if self.paused { AssistantStatus::Paused } else { AssistantStatus::Waiting };
     }
@@ -179,15 +229,17 @@ impl SessionData {
         LiveAssistantState {
             active,
             status: self.status,
-            goal: self.goal.clone(),
             provider: self.provider.clone(),
             model: self.model.clone(),
             is_cloud: self.is_cloud,
             last_tick_at: self.last_tick_at.map(|t| t.to_rfc3339()),
             error: self.error.clone(),
             tick_no: self.tick_no,
+            progress: self.progress,
             state: self.state_text.clone(),
             suggestions: self.suggestions.clone(),
+            chat: self.chat.clone(),
+            chat_pending: self.chat_pending,
         }
     }
 }
@@ -202,7 +254,7 @@ struct Session {
 struct AssistantInner {
     session: Option<Session>,
     last_suggestions: Vec<Suggestion>,
-    last_goal: String,
+    last_chat: Vec<ChatMessage>,
     last_state_text: String,
 }
 
@@ -232,7 +284,7 @@ fn emit_status<R: Runtime>(app: &AppHandle<R>, data: &SessionData, active: bool)
     let _ = app.emit("assistant-status", data.snapshot(active));
 }
 
-pub fn start<R: Runtime>(app: &AppHandle<R>, goal: Option<String>) -> Result<(), String> {
+pub fn start<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let state = app
         .try_state::<AssistantState>()
         .ok_or_else(|| "Live assistant state is not initialised".to_string())?;
@@ -240,15 +292,10 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, goal: Option<String>) -> Result<(),
     if inner.session.is_some() {
         return Ok(());
     }
-    let mut settings = settings::load(app);
-    let goal = goal.unwrap_or_else(|| settings.last_goal.clone());
-    if settings.last_goal != goal {
-        settings.last_goal = goal.clone();
-        let _ = settings::save(app, &settings);
-    }
-    let mut resumed = SessionData::new(goal);
+    let mut resumed = SessionData::new();
     resumed.suggestions = inner.last_suggestions.clone();
     resumed.state_text = inner.last_state_text.clone();
+    resumed.chat = inner.last_chat.clone();
     resumed.next_id = resumed
         .suggestions
         .iter()
@@ -275,13 +322,14 @@ pub fn on_recording_started<R: Runtime>(app: &AppHandle<R>) {
     if let Some(state) = app.try_state::<AssistantState>() {
         let mut inner = lock_inner(&state);
         inner.last_suggestions.clear();
+        inner.last_chat.clear();
         inner.last_state_text.clear();
     }
     let settings = settings::load(app);
     if !settings.enabled {
         return;
     }
-    if let Err(error) = start(app, None) {
+    if let Err(error) = start(app) {
         warn!("Live assistant autostart failed: {}", error);
     }
 }
@@ -307,8 +355,9 @@ fn close_session<R: Runtime>(app: &AppHandle<R>, only: Option<&Arc<Mutex<Session
     session.notify.notify_one();
     let mut data = lock_data(&session.data);
     data.status = AssistantStatus::Idle;
+    data.chat_pending = false;
     inner.last_suggestions = data.suggestions.clone();
-    inner.last_goal = data.goal.clone();
+    inner.last_chat = data.chat.clone();
     inner.last_state_text = data.state_text.clone();
     emit_status(app, &data, false);
     info!("Live assistant session stopped after {} ticks", data.tick_no);
@@ -337,6 +386,9 @@ pub fn set_paused<R: Runtime>(app: &AppHandle<R>, paused: bool) -> Result<(), St
             if let Some(inflight) = data.inflight.take() {
                 inflight.cancel();
             }
+            if let Some(chat) = data.chat_inflight.take() {
+                chat.cancel();
+            }
         } else {
             data.failures = 0;
             data.error = None;
@@ -345,26 +397,6 @@ pub fn set_paused<R: Runtime>(app: &AppHandle<R>, paused: bool) -> Result<(), St
         emit_status(app, &data, true);
     })
     .ok_or_else(|| "Live assistant is not running".to_string())
-}
-
-pub fn set_goal<R: Runtime>(app: &AppHandle<R>, goal: String) -> Result<(), String> {
-    let mut settings = settings::load(app);
-    settings.last_goal = goal.clone();
-    settings::save(app, &settings)?;
-    if with_session(app, |session| {
-        let mut data = lock_data(&session.data);
-        data.goal = goal.clone();
-        data.pending = true;
-        session.notify.notify_one();
-        emit_status(app, &data, true);
-    })
-    .is_none()
-    {
-        if let Some(state) = app.try_state::<AssistantState>() {
-            lock_inner(&state).last_goal = goal;
-        }
-    }
-    Ok(())
 }
 
 pub fn update_suggestion<R: Runtime>(
@@ -405,25 +437,27 @@ pub fn snapshot<R: Runtime>(app: &AppHandle<R>) -> LiveAssistantState {
     if let Some(state) = with_session(app, |session| lock_data(&session.data).snapshot(true)) {
         return state;
     }
-    let (suggestions, goal) = app
+    let (suggestions, chat) = app
         .try_state::<AssistantState>()
         .map(|state| {
             let inner = lock_inner(&state);
-            (inner.last_suggestions.clone(), inner.last_goal.clone())
+            (inner.last_suggestions.clone(), inner.last_chat.clone())
         })
         .unwrap_or_default();
     LiveAssistantState {
         active: false,
         status: AssistantStatus::Idle,
-        goal,
         provider: String::new(),
         model: String::new(),
         is_cloud: false,
         last_tick_at: None,
         error: None,
         tick_no: 0,
+        progress: 0,
         state: String::new(),
         suggestions,
+        chat,
+        chat_pending: false,
     }
 }
 
@@ -513,9 +547,9 @@ fn short_error(error: &str) -> String {
 
 fn persist_snapshot(folder: &Path, data: &SessionData) {
     let payload = serde_json::json!({
-        "goal": data.goal,
         "state": data.state_text,
         "suggestions": data.suggestions,
+        "chat": data.chat,
         "updated_at": Utc::now().to_rfc3339(),
     });
     let Ok(serialized) = serde_json::to_string_pretty(&payload) else {
@@ -536,13 +570,15 @@ pub fn read_snapshot(folder: &Path) -> Option<Vec<Suggestion>> {
     serde_json::from_value(value.get("suggestions")?.clone()).ok()
 }
 
-struct TickPlan {
+struct RequestPlan {
     provider_settings: ProviderSettings,
+    cloud: bool,
+    consented: bool,
     provider_label: String,
     model: String,
 }
 
-async fn plan_tick<R: Runtime>(app: &AppHandle<R>, data: &Arc<Mutex<SessionData>>) -> Result<TickPlan, String> {
+async fn resolve_plan<R: Runtime>(app: &AppHandle<R>, data: &Arc<Mutex<SessionData>>) -> Result<RequestPlan, String> {
     let settings = settings::load(app);
     let (provider_label, model) = resolve_target(app, &settings).await?;
     let pool = db_pool(app)?;
@@ -555,22 +591,54 @@ async fn plan_tick<R: Runtime>(app: &AppHandle<R>, data: &Arc<Mutex<SessionData>
         guard.is_cloud = cloud;
         guard.builtin = provider_settings.provider == LLMProvider::BuiltInAI;
     }
-    if cloud && !settings.has_cloud_consent(&provider_label) {
-        return Err(format!(
-            "Confirm sending the live transcript to {} in the assistant settings first",
-            provider_label
-        ));
+    let consented = !cloud || settings.has_cloud_consent(&provider_label);
+    Ok(RequestPlan { provider_settings, cloud, consented, provider_label, model })
+}
+
+async fn call_model<R: Runtime>(
+    app: &AppHandle<R>,
+    plan: &RequestPlan,
+    system_prompt: &str,
+    user_prompt: &str,
+    token: &CancellationToken,
+    options: CompletionOptions,
+) -> Result<String, String> {
+    let settings = &plan.provider_settings;
+    let app_data_dir = app.path().app_data_dir().ok();
+    let _transcription_hold = (!plan.cloud).then(hold_transcription);
+    let mut request = std::pin::pin!(complete(
+        &HTTP_CLIENT,
+        &settings.provider,
+        &plan.model,
+        &settings.api_key,
+        system_prompt,
+        user_prompt,
+        settings.ollama_endpoint.as_deref(),
+        settings.custom_openai_endpoint.as_deref(),
+        settings.custom_max_tokens,
+        settings.custom_temperature,
+        settings.custom_top_p,
+        app_data_dir.as_ref(),
+        Some(token),
+        options,
+    ));
+    tokio::select! {
+        result = &mut request => result.map(|completion| completion.content),
+        _ = tokio::time::sleep(REQUEST_TIMEOUT) => {
+            token.cancel();
+            let _ = request.await;
+            Err("Model did not answer within two minutes".to_string())
+        }
     }
-    Ok(TickPlan { provider_settings, provider_label, model })
 }
 
 async fn run_tick<R: Runtime>(
     app: &AppHandle<R>,
-    client: &reqwest::Client,
     data: &Arc<Mutex<SessionData>>,
-    plan: &TickPlan,
+    plan: &RequestPlan,
     snapshot: &LiveTranscriptSnapshot,
     token: &CancellationToken,
+    on_demand: bool,
 ) -> Result<(ModelOutput, Option<u64>), String> {
     let segments = &snapshot.segments;
     if segments.is_empty() {
@@ -590,7 +658,6 @@ async fn run_tick<R: Runtime>(
             .collect();
         prompt::build_prefix(&PromptContext {
             title: snapshot.meeting_name.as_deref().unwrap_or(""),
-            goal: &guard.goal,
             language_name: &language,
             state: &guard.state_text,
             open: &guard.suggestions,
@@ -599,34 +666,111 @@ async fn run_tick<R: Runtime>(
     };
     let window_budget = budget.saturating_sub(rough_token_count(&prefix)).max(200);
     let window = prompt::select_window(segments, window_budget);
-    let user_prompt = prompt::build_user_prompt(prefix, window);
+    let user_prompt = prompt::build_user_prompt(prefix, window, on_demand);
     let through_seq = window.last().map(|s| s.sequence_id);
-
-    let settings = &plan.provider_settings;
-    let app_data_dir = app.path().app_data_dir().ok();
-    let completion = complete(
-        client,
-        &settings.provider,
-        &plan.model,
-        &settings.api_key,
-        prompt::SYSTEM_PROMPT,
-        &user_prompt,
-        settings.ollama_endpoint.as_deref(),
-        settings.custom_openai_endpoint.as_deref(),
-        settings.custom_max_tokens,
-        settings.custom_temperature,
-        settings.custom_top_p,
-        app_data_dir.as_ref(),
-        Some(token),
-        CompletionOptions { json_mode: true, max_tokens: Some(OUTPUT_TOKENS) },
-    )
-    .await?;
-
-    Ok((prompt::parse_model_output(&completion.content)?, through_seq))
+    let options = CompletionOptions { json_mode: true, max_tokens: Some(OUTPUT_TOKENS) };
+    let content = call_model(app, plan, prompt::SYSTEM_PROMPT, &user_prompt, token, options).await?;
+    Ok((prompt::parse_model_output(&content)?, through_seq))
 }
 
-fn defer_for_busy_sidecar<R: Runtime>(app: &AppHandle<R>, data: &Arc<Mutex<SessionData>>) {
+pub async fn ask<R: Runtime>(app: &AppHandle<R>, question: String) -> Result<(), String> {
+    let question = question.trim().to_string();
+    if question.is_empty() {
+        return Err("Type a question first".to_string());
+    }
+    if question.chars().count() > MAX_QUESTION_CHARS {
+        return Err(format!("Keep the question under {} characters", MAX_QUESTION_CHARS));
+    }
+    let (data, token) = with_session(app, |session| (session.data.clone(), session.token.clone()))
+        .ok_or_else(|| "Chat works while a recording is running".to_string())?;
+    let chat_token = token.child_token();
+    {
+        let mut guard = lock_data(&data);
+        if guard.chat_pending {
+            return Err("Wait for the current answer".to_string());
+        }
+        guard.chat_pending = true;
+        guard.chat_inflight = Some(chat_token.clone());
+        guard.push_chat(ChatRole::User, question, false);
+        emit_status(app, &guard, true);
+    }
+    let answer = answer_chat(app, &data, &chat_token).await;
+    if token.is_cancelled() {
+        return Ok(());
+    }
+    let mut guard = lock_data(&data);
+    guard.chat_pending = false;
+    let paused_mid_answer = guard.chat_inflight.take().is_none();
+    match answer {
+        Ok(text) => guard.push_chat(ChatRole::Assistant, text, false),
+        Err(_) if paused_mid_answer => {
+            guard.push_chat(ChatRole::Assistant, "Stopped because the assistant was paused".to_string(), true);
+        }
+        Err(error) => {
+            let error = short_error(&error);
+            warn!("Live assistant chat failed: {}", error);
+            guard.push_chat(ChatRole::Assistant, error, true);
+        }
+    }
+    emit_status(app, &guard, true);
+    if let Some(folder) = guard.meeting_folder.clone() {
+        persist_snapshot(&folder, &guard);
+    }
+    Ok(())
+}
+
+async fn answer_chat<R: Runtime>(
+    app: &AppHandle<R>,
+    data: &Arc<Mutex<SessionData>>,
+    chat_token: &CancellationToken,
+) -> Result<String, String> {
+    let plan = resolve_plan(app, data).await?;
+    if !plan.consented {
+        return Err(format!("Allow sending the live transcript to {} first", plan.provider_label));
+    }
+    let snapshot = live_transcript_snapshot().ok_or_else(|| "No active recording".to_string())?;
+    let budget = input_budget(&plan.provider_settings, &plan.model).await;
+    let (prefix, history) = {
+        let guard = lock_data(data);
+        let history = recent_chat(&guard.chat, budget / 3);
+        let prefix = prompt::build_prefix(&PromptContext {
+            title: snapshot.meeting_name.as_deref().unwrap_or(""),
+            language_name: prompt::CHAT_LANGUAGE,
+            state: &guard.state_text,
+            open: &guard.suggestions,
+            dismissed_texts: &[],
+        });
+        (prefix, history)
+    };
+    let history_tokens: usize = history.iter().map(|m| rough_token_count(&m.text)).sum();
+    let window_budget = budget
+        .saturating_sub(rough_token_count(&prefix) + history_tokens)
+        .max(200);
+    let window = prompt::select_window(&snapshot.segments, window_budget);
+    let user_prompt = prompt::build_chat_prompt(prefix, window, &history);
+    info!("Live assistant chat via {}/{}", plan.provider_label, plan.model);
+    let options = CompletionOptions { json_mode: false, max_tokens: Some(CHAT_OUTPUT_TOKENS) };
+    let content = call_model(app, &plan, prompt::CHAT_SYSTEM_PROMPT, &user_prompt, chat_token, options).await?;
+    visible_chat_answer(&content, &snapshot.segments)
+}
+
+fn visible_chat_answer(content: &str, segments: &[TranscriptSegment]) -> Result<String, String> {
+    let cleaned = clean_llm_markdown_detailed(content);
+    require_visible_markdown("Chat answer", &cleaned)?;
+    Ok(prompt::unlink_unknown_citations(&cleaned.markdown, segments))
+}
+
+fn recent_chat(chat: &[ChatMessage], budget_tokens: usize) -> Vec<ChatMessage> {
+    let turns: Vec<ChatMessage> = chat.iter().filter(|m| !m.error).cloned().collect();
+    let skip = turns.len().saturating_sub(MAX_CHAT_HISTORY);
+    prompt::newest_within_budget(&turns[skip..], budget_tokens, |m| rough_token_count(&m.text)).to_vec()
+}
+
+fn defer_for_busy_sidecar<R: Runtime>(app: &AppHandle<R>, data: &Arc<Mutex<SessionData>>, manual: bool) {
     let mut guard = lock_data(data);
+    if manual {
+        guard.manual_requested = true;
+    }
     if guard.pending && guard.status == AssistantStatus::Waiting {
         return;
     }
@@ -641,10 +785,15 @@ async fn run_loop<R: Runtime>(
     token: CancellationToken,
     notify: Arc<Notify>,
 ) {
-    let client = reqwest::Client::new();
-    let _ = plan_tick(&app, &data).await;
+    let initial = resolve_plan(&app, &data).await;
     if !token.is_cancelled() {
-        emit_status(&app, &lock_data(&data), true);
+        let mut guard = lock_data(&data);
+        match initial {
+            Ok(plan) if !plan.consented => guard.pause_for_consent(),
+            Ok(_) => {}
+            Err(error) => guard.fail_setup(&error),
+        }
+        emit_status(&app, &guard, true);
     }
     loop {
         tokio::select! {
@@ -693,6 +842,11 @@ async fn run_loop<R: Runtime>(
             } else {
                 guard.due_since = None;
             }
+            let progress = if input.paused { guard.progress } else { next_tick_progress(&input) };
+            if progress != guard.progress {
+                guard.progress = progress;
+                let _ = app.emit("assistant-progress", serde_json::json!({ "progress": progress }));
+            }
             let due = tick_due(&input);
             if due {
                 guard.manual_requested = false;
@@ -704,30 +858,32 @@ async fn run_loop<R: Runtime>(
             continue;
         }
 
-        let planned = plan_tick(&app, &data).await;
+        let planned = resolve_plan(&app, &data).await;
         if token.is_cancelled() {
             break;
         }
         let plan = match planned {
+            Ok(plan) if !plan.consented => {
+                let mut guard = lock_data(&data);
+                guard.pause_for_consent();
+                emit_status(&app, &guard, true);
+                continue;
+            }
             Ok(plan) => plan,
             Err(error) => {
                 let mut guard = lock_data(&data);
-                guard.status = AssistantStatus::Error;
-                guard.paused = true;
-                guard.error = Some(short_error(&error));
-                guard.pending = false;
+                guard.fail_setup(&error);
                 emit_status(&app, &guard, true);
                 let _ = app.emit("assistant-error", serde_json::json!({ "message": guard.error }));
                 continue;
             }
         };
 
-        let builtin = plan.provider_settings.provider == LLMProvider::BuiltInAI;
-        if builtin && is_sidecar_busy().await {
+        if plan.provider_settings.provider == LLMProvider::BuiltInAI && is_sidecar_busy().await {
             if token.is_cancelled() {
                 break;
             }
-            defer_for_busy_sidecar(&app, &data);
+            defer_for_busy_sidecar(&app, &data, manual);
             continue;
         }
 
@@ -757,21 +913,14 @@ async fn run_loop<R: Runtime>(
             manual
         );
 
-        let tick = run_tick(&app, &client, &data, &plan, &snapshot, &tick_token);
-        let result = if builtin {
-            tick.await
-        } else {
-            tokio::time::timeout(HTTP_TICK_TIMEOUT, tick)
-                .await
-                .unwrap_or_else(|_| Err("Provider did not answer within two minutes".to_string()))
-        };
+        let result = run_tick(&app, &data, &plan, &snapshot, &tick_token, manual).await;
         if token.is_cancelled() {
             break;
         }
         let mut guard = lock_data(&data);
-        guard.inflight = None;
+        let paused_mid_run = guard.inflight.take().is_none();
         guard.last_duration = started.elapsed();
-        if tick_token.is_cancelled() {
+        if paused_mid_run {
             guard.settle_status();
             emit_status(&app, &guard, true);
             continue;
@@ -780,6 +929,7 @@ async fn run_loop<R: Runtime>(
             Ok((output, through_seq)) => {
                 let outcome = prompt::reconcile(guard.suggestions.clone(), output, &snapshot.segments, guard.next_id);
                 guard.tick_no += 1;
+                guard.progress = 0;
                 guard.suggestions = outcome.open;
                 if !outcome.state.trim().is_empty() {
                     guard.state_text = outcome.state;
@@ -899,6 +1049,70 @@ mod tests {
         assert!(!tick_due(&i));
         i.since_last_tick = Duration::from_secs(50);
         assert!(tick_due(&i));
+    }
+
+    #[test]
+    fn progress_tracks_words_then_floor_and_matches_due() {
+        let mut i = input();
+        i.has_ticked = false;
+        i.since_last_tick = Duration::ZERO;
+        i.new_words = 60;
+        assert_eq!(next_tick_progress(&i), 50);
+        i.new_words = 119;
+        assert_eq!(next_tick_progress(&i), 99);
+        assert!(!content_due(&i));
+        i.new_words = 120;
+        assert_eq!(next_tick_progress(&i), 100);
+        assert!(tick_due(&i));
+        i.has_ticked = true;
+        i.since_last_tick = Duration::from_secs(9);
+        assert_eq!(next_tick_progress(&i), 20);
+        assert!(!tick_due(&i));
+    }
+
+    #[test]
+    fn progress_follows_slow_tick_path() {
+        let mut i = input();
+        i.new_words = 30;
+        i.since_last_tick = Duration::from_secs(45);
+        assert_eq!(next_tick_progress(&i), 50);
+        i.since_last_tick = Duration::from_secs(90);
+        assert_eq!(next_tick_progress(&i), 100);
+        assert!(tick_due(&i));
+        i.pending = true;
+        i.new_words = 0;
+        assert_eq!(next_tick_progress(&i), 100);
+    }
+
+    #[test]
+    fn chat_history_keeps_newest_turns_within_budget() {
+        let message = |id: &str, words: usize| ChatMessage {
+            id: id.to_string(),
+            role: ChatRole::User,
+            text: "word ".repeat(words),
+            error: false,
+        };
+        let chat = vec![message("c1", 400), message("c2", 10), message("c3", 10)];
+        let ids = |history: Vec<ChatMessage>| history.into_iter().map(|m| m.id).collect::<Vec<_>>();
+        assert_eq!(ids(recent_chat(&chat, 100)), vec!["c2", "c3"]);
+        let mut failed = message("c4", 1);
+        failed.error = true;
+        let with_failure = vec![message("c1", 1), failed, message("c5", 1)];
+        assert_eq!(ids(recent_chat(&with_failure, 10_000)), vec!["c1", "c5"]);
+        assert_eq!(ids(recent_chat(&chat, 10_000)), vec!["c1", "c2", "c3"]);
+        assert_eq!(ids(recent_chat(&chat[..1], 5)), vec!["c1"]);
+        let long: Vec<ChatMessage> = (0..20).map(|i| message(&format!("c{}", i), 1)).collect();
+        assert_eq!(recent_chat(&long, 10_000).len(), MAX_CHAT_HISTORY);
+    }
+
+    #[test]
+    fn chat_answer_drops_model_reasoning() {
+        assert_eq!(
+            visible_chat_answer("<think>secret reasoning</think>Nobody owns it yet.", &[]).unwrap(),
+            "Nobody owns it yet."
+        );
+        assert!(visible_chat_answer("<think>only reasoning</think>", &[]).is_err());
+        assert!(visible_chat_answer("<think>cut off mid thought", &[]).is_err());
     }
 
     #[test]

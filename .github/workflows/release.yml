@@ -67,7 +67,7 @@ jobs:
             echo
             echo "1. Launch Meetily and download the Whisper \`base\` model when asked."
             echo "2. Press record; the transcript appears live."
-            echo "3. Optional: turn on the live assistant in Settings, Summary."
+            echo "3. The live assistant beside the transcript suggests questions and answers chat; a cloud provider asks for confirmation first."
             echo
             echo "Full changelog: https://github.com/${{ github.repository }}/commits/${TAG}"
           } > notes.md

@@ -14,20 +14,29 @@ export interface Suggestion {
   missed_ticks?: number;
 }
 
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  error: boolean;
+}
+
 export type AssistantStatus = 'idle' | 'waiting' | 'generating' | 'paused' | 'error';
 
 export interface LiveAssistantState {
   active: boolean;
   status: AssistantStatus;
-  goal: string;
   provider: string;
   model: string;
   is_cloud: boolean;
   last_tick_at: string | null;
   error: string | null;
   tick_no: number;
+  progress: number;
   state: string;
   suggestions: Suggestion[];
+  chat: ChatMessage[];
+  chat_pending: boolean;
 }
 
 export interface AssistantSettings {
@@ -35,7 +44,6 @@ export interface AssistantSettings {
   provider: string | null;
   model: string | null;
   cloud_consent: Record<string, boolean>;
-  last_goal: string;
 }
 
 type Provider = ModelConfig['provider'];
@@ -61,6 +69,14 @@ const STALE_AFTER_MS = 3 * 60 * 1000;
 
 export function providerLabel(provider: string): string {
   return PROVIDER_LABELS[provider as Provider] ?? provider;
+}
+
+export function hasCloudConsent(settings: AssistantSettings, provider: string): boolean {
+  return settings.cloud_consent[provider] === true;
+}
+
+export function withCloudConsent(settings: AssistantSettings, provider: string): AssistantSettings {
+  return { ...settings, cloud_consent: { ...settings.cloud_consent, [provider]: true } };
 }
 
 export function isLocalEndpoint(endpoint: string | null | undefined): boolean {
@@ -117,6 +133,24 @@ export function formatClock(seconds: number): string {
   const mm = minutes.toString().padStart(2, '0');
   const ss = secs.toString().padStart(2, '0');
   return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+export type ChatPart = { text: string } | { clock: string; seconds: number };
+
+const CITATION = /\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g;
+
+export function splitCitations(text: string): ChatPart[] {
+  const parts: ChatPart[] = [];
+  let last = 0;
+  for (const match of text.matchAll(CITATION)) {
+    const index = match.index ?? 0;
+    if (index > last) parts.push({ text: text.slice(last, index) });
+    const seconds = match[1].split(':').reduce((total, unit) => total * 60 + Number(unit), 0);
+    parts.push({ clock: match[1], seconds });
+    last = index + match[0].length;
+  }
+  if (last < text.length) parts.push({ text: text.slice(last) });
+  return parts;
 }
 
 export function describeAge(lastTickAt: string | null, now: number = Date.now()): { label: string; stale: boolean } {

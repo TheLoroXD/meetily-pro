@@ -183,15 +183,15 @@ export function useAutoScroll({
         if (activeSegmentId) {
             isProgrammaticScrollRef.current = true;
 
-            if (useVirtualization && virtualizer) {
+            const findElement = () => document.getElementById(`segment-${activeSegmentId}`);
+            const scrollToElement = () => findElement()?.scrollIntoView({ behavior: "smooth", block: "center" });
+            if (findElement()) {
+                scrollToElement();
+            } else if (useVirtualization && virtualizer) {
                 const index = segmentsRef.current.findIndex((s: any) => s.id === activeSegmentId);
                 if (index >= 0) {
-                    virtualizer.scrollToIndex(index, { align: "center", behavior: "smooth" });
-                }
-            } else {
-                const element = document.getElementById(`segment-${activeSegmentId}`);
-                if (element) {
-                    element.scrollIntoView({ behavior: "smooth", block: "center" });
+                    virtualizer.scrollToIndex(index, { align: "center" });
+                    requestAnimationFrame(scrollToElement);
                 }
             }
 

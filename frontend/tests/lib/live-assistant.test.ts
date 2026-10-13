@@ -7,6 +7,7 @@ import {
   isCloudProvider,
   isLocalEndpoint,
   sortSuggestions,
+  splitCitations,
   type Suggestion,
 } from '../../src/lib/live-assistant';
 
@@ -23,6 +24,17 @@ const item = (id: string, overrides: Partial<Suggestion> = {}): Suggestion => ({
 });
 
 describe('live assistant helpers', () => {
+  test('splits chat answers into text and clickable citations', () => {
+    expect(splitCitations('Owner unclear [01:00], deadline [1:02:03].')).toEqual([
+      { text: 'Owner unclear ' },
+      { clock: '01:00', seconds: 60 },
+      { text: ', deadline ' },
+      { clock: '1:02:03', seconds: 3723 },
+      { text: '.' },
+    ]);
+    expect(splitCitations('No citations')).toEqual([{ text: 'No citations' }]);
+  });
+
   test('sorts pinned first, then newest, and hides dismissed', () => {
     const ordered = sortSuggestions([
       item('s1'),

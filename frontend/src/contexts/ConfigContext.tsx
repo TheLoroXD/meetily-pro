@@ -249,6 +249,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
                   provider: data.provider,
                   model: resolvedModel || prev.model,
                   whisperModel: data.whisperModel || prev.whisperModel,
+                  ollamaEndpoint: data.ollamaEndpoint,
                   customOpenAIEndpoint: customConfig.endpoint,
                   customOpenAIModel: customConfig.model,
                   customOpenAIApiKey: customConfig.apiKey,

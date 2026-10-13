@@ -7,11 +7,8 @@ use crate::database::repositories::suggestion::MeetingSuggestionsRepository;
 use crate::state::AppState;
 
 #[tauri::command]
-pub async fn start_live_assistant<R: Runtime>(
-    app: AppHandle<R>,
-    goal: Option<String>,
-) -> Result<(), String> {
-    service::start(&app, goal)
+pub async fn start_live_assistant<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    service::start(&app)
 }
 
 #[tauri::command]
@@ -25,11 +22,6 @@ pub async fn pause_live_assistant<R: Runtime>(app: AppHandle<R>, paused: bool) -
 }
 
 #[tauri::command]
-pub async fn set_live_assistant_goal<R: Runtime>(app: AppHandle<R>, goal: String) -> Result<(), String> {
-    service::set_goal(&app, goal)
-}
-
-#[tauri::command]
 pub async fn update_live_suggestion<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -37,6 +29,11 @@ pub async fn update_live_suggestion<R: Runtime>(
     dismissed: Option<bool>,
 ) -> Result<(), String> {
     service::update_suggestion(&app, &id, pinned, dismissed)
+}
+
+#[tauri::command]
+pub async fn ask_live_assistant<R: Runtime>(app: AppHandle<R>, question: String) -> Result<(), String> {
+    service::ask(&app, question).await
 }
 
 #[tauri::command]
@@ -54,7 +51,6 @@ pub async fn api_save_assistant_settings<R: Runtime>(
     app: AppHandle<R>,
     settings: AssistantSettings,
 ) -> Result<(), String> {
-    let settings = AssistantSettings { last_goal: settings::load(&app).last_goal, ..settings };
     settings::save(&app, &settings)?;
     if !settings.enabled {
         service::stop(&app);

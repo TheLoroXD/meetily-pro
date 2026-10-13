@@ -17,6 +17,27 @@ static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 // Speech detection flag - reset per recording session
 static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
 
+static TRANSCRIPTION_HOLDS: std::sync::LazyLock<tokio::sync::watch::Sender<usize>> =
+    std::sync::LazyLock::new(|| tokio::sync::watch::channel(0).0);
+
+pub struct TranscriptionHold(());
+
+pub fn hold_transcription() -> TranscriptionHold {
+    TRANSCRIPTION_HOLDS.send_modify(|holds| *holds += 1);
+    TranscriptionHold(())
+}
+
+impl Drop for TranscriptionHold {
+    fn drop(&mut self) {
+        TRANSCRIPTION_HOLDS.send_modify(|holds| *holds = holds.saturating_sub(1));
+    }
+}
+
+async fn wait_until_transcription_released() {
+    let mut holds = TRANSCRIPTION_HOLDS.subscribe();
+    let _ = holds.wait_for(|count| *count == 0).await;
+}
+
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
     SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst);
@@ -123,6 +144,7 @@ pub fn start_transcription_task<R: Runtime>(
                         let mut receiver = work_receiver_clone.lock().await;
                         receiver.recv().await
                     };
+                    wait_until_transcription_released().await;
 
                     match chunk {
                         Some(chunk) => {

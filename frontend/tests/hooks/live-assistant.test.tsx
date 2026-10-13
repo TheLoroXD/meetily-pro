@@ -34,7 +34,7 @@ const invoke = mock(async (command: string, args?: Record<string, unknown>): Pro
       : item);
     return null;
   }
-  if (command === 'refresh_live_assistant' || command === 'pause_live_assistant' || command === 'set_live_assistant_goal' || command === 'start_live_assistant') return null;
+  if (command === 'refresh_live_assistant' || command === 'pause_live_assistant' || command === 'ask_live_assistant' || command === 'start_live_assistant') return null;
   throw new Error(`Unexpected command: ${command}`);
 });
 mock.module('@tauri-apps/api/core', () => ({ invoke }));
@@ -63,8 +63,8 @@ function emit(name: string, payload: unknown) {
   (listeners.get(name) ?? []).forEach((listener) => listener({ payload }));
 }
 const idle = (): LiveAssistantState => ({
-  active: false, status: 'idle', goal: '', provider: '', model: '', is_cloud: false, last_tick_at: null,
-  error: null, tick_no: 0, state: '', suggestions: [],
+  active: false, status: 'idle', provider: '', model: '', is_cloud: false, last_tick_at: null,
+  error: null, tick_no: 0, progress: 0, state: '', suggestions: [], chat: [], chat_pending: false,
 });
 
 beforeEach(() => {
@@ -104,6 +104,30 @@ describe('useLiveAssistant', () => {
     expect(hook.state.suggestions.map((s) => s.id)).toEqual(['old']);
     await act(async () => { emit('assistant-status', { ...idle(), active: true, status: 'waiting', tick_no: 0 }); });
     expect(hook.state.suggestions).toEqual([]);
+  });
+
+  test('status events carry the progress so a remount starts from the current fill', async () => {
+    backendState = { ...idle(), active: true, status: 'waiting', progress: 42 };
+    await mount();
+    expect(hook.state.progress).toBe(42);
+    await act(async () => { emit('assistant-status', { ...idle(), active: true, status: 'waiting', tick_no: 1, progress: 0 }); });
+    expect(hook.state.progress).toBe(0);
+  });
+
+  test('ask sends the question and the chat arrives through status events', async () => {
+    backendState = { ...idle(), active: true, status: 'waiting' };
+    await mount();
+    let sent = false;
+    await act(async () => { sent = await hook.ask('Who owns the migration?'); });
+    expect(sent).toBe(true);
+    expect(calls.find((c) => c.command === 'ask_live_assistant')?.args).toEqual({ question: 'Who owns the migration?' });
+    const chat = [
+      { id: 'c1', role: 'user' as const, text: 'Who owns the migration?', error: false },
+      { id: 'c2', role: 'assistant' as const, text: 'Nobody yet [01:00].', error: false },
+    ];
+    await act(async () => { emit('assistant-status', { ...idle(), active: true, status: 'waiting', chat }); });
+    expect(hook.state.chat.map((m) => m.id)).toEqual(['c1', 'c2']);
+    expect(hook.state.chat_pending).toBe(false);
   });
 
   test('dismiss and pin update locally before the backend confirms', async () => {

@@ -47,7 +47,7 @@ Live transcription on device (Whisper with Metal/CUDA/Vulkan/ROCm, or Parakeet o
 
 <p align="center"><img src="docs/home.png" width="720" alt="Live transcription" /></p>
 
-Live assistant beside the transcript: questions and tips cited to transcript moments, off by default. Design: [docs/LIVE_ASSISTANT_DESIGN.md](docs/LIVE_ASSISTANT_DESIGN.md).
+Live assistant beside the transcript: questions and tips cited to transcript moments, plus a chat about the call so far. Design: [docs/LIVE_ASSISTANT_DESIGN.md](docs/LIVE_ASSISTANT_DESIGN.md).
 
 Summaries from templates (standard, standup, retro, client call), editable in place.
 
