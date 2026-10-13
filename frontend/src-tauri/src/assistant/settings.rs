@@ -6,18 +6,24 @@ use tauri_plugin_store::StoreExt;
 const STORE_FILE: &str = "assistant-preferences.json";
 const STORE_KEY: &str = "settings";
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct AssistantSettings {
-    #[serde(default)]
     pub enabled: bool,
-    #[serde(default)]
     pub provider: Option<String>,
-    #[serde(default)]
     pub model: Option<String>,
-    #[serde(default)]
     pub cloud_consent: HashMap<String, bool>,
-    #[serde(default)]
-    pub last_goal: String,
+}
+
+impl Default for AssistantSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            provider: None,
+            model: None,
+            cloud_consent: HashMap::new(),
+        }
+    }
 }
 
 impl AssistantSettings {

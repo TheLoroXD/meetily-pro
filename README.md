@@ -30,12 +30,26 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 2. Pick a summary engine: built-in local model, Ollama, or a cloud key (OpenAI, Claude, Groq, OpenRouter, custom OpenAI-compatible).
 3. Choose mic and system-audio device, press Record. Stop when done, open the meeting, generate the summary.
 
-## What's new in v1.0.0
+## What's new
 
-- Live assistant: a side pane while recording suggests questions to ask and facts to clarify, each linked to the moment in the transcript.
-- Pin, dismiss, copy or jump to a suggestion; pinned ones carry into the summary, and the meeting page lists what was suggested during the call.
-- Uses your summary model or a separate one; cloud providers need a one-time confirmation per provider.
-- Includes everything in upstream [v0.4.1](https://github.com/Zackriya-Solutions/meetily/releases/tag/v0.4.1).
+### v1.1.0
+
+- The assistant is on from the start, and a bar shows when its next tip is coming. Press refresh to get one right away.
+- Ask the assistant anything during the call. Answers point to the moment it was said, and tapping a suggestion asks about it.
+- Works smoothly with models on your own computer, even when people talk without pauses.
+- Simpler assistant settings that tell you what is missing. Online models can be allowed right from the assistant panel.
+
+### v1.0.0
+
+- A new assistant next to the live transcript suggests questions to ask and things to clarify, each linked to where it was said.
+- Pin the useful suggestions to include them in the meeting summary.
+- Ready-to-install downloads for Mac and Linux.
+
+### v0.4.1 (upstream)
+
+- More accurate live transcription with fewer made-up lines.
+- Bluetooth microphones on Mac work more reliably.
+- Better summaries of long meetings.
 
 ## Roadmap
 
@@ -47,7 +61,7 @@ Live transcription on device (Whisper with Metal/CUDA/Vulkan/ROCm, or Parakeet o
 
 <p align="center"><img src="docs/home.png" width="720" alt="Live transcription" /></p>
 
-Live assistant beside the transcript: questions and tips cited to transcript moments, off by default. Design: [docs/LIVE_ASSISTANT_DESIGN.md](docs/LIVE_ASSISTANT_DESIGN.md).
+Live assistant beside the transcript: questions and tips cited to transcript moments, plus a chat about the call so far. Design: [docs/LIVE_ASSISTANT_DESIGN.md](docs/LIVE_ASSISTANT_DESIGN.md).
 
 Summaries from templates (standard, standup, retro, client call), editable in place.
 

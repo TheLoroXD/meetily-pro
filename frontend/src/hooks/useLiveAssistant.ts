@@ -6,15 +6,17 @@ import type { LiveAssistantState, Suggestion } from '@/lib/live-assistant';
 const EMPTY_STATE: LiveAssistantState = {
   active: false,
   status: 'idle',
-  goal: '',
   provider: '',
   model: '',
   is_cloud: false,
   last_tick_at: null,
   error: null,
   tick_no: 0,
+  progress: 0,
   state: '',
   suggestions: [],
+  chat: [],
+  chat_pending: false,
 };
 
 export function useLiveAssistant() {
@@ -112,23 +114,24 @@ export function useLiveAssistant() {
     }
   }, []);
 
-  const setGoal = useCallback(async (goal: string) => {
-    setState((prev) => ({ ...prev, goal }));
+  const ask = useCallback(async (question: string) => {
     try {
-      await assistantService.setGoal(goal);
+      await assistantService.ask(question);
+      return true;
     } catch (error) {
-      console.warn('Failed to save assistant goal:', error);
+      toast.error('Could not ask the assistant', { description: String(error) });
+      return false;
     }
   }, []);
 
-  const start = useCallback(async (goal?: string) => {
+  const start = useCallback(async () => {
     try {
-      await assistantService.start(goal);
+      await assistantService.start();
       await resync();
     } catch (error) {
       toast.error('Could not start the live assistant', { description: String(error) });
     }
   }, [resync]);
 
-  return { state, pin, dismiss, refresh, setPaused, setGoal, start };
+  return { state, pin, dismiss, refresh, setPaused, ask, start };
 }

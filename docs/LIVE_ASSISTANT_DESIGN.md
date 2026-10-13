@@ -1,6 +1,6 @@
 # Live Assistant: design record
 
-Status: implemented on branch feat/live-assistant (Claude Code provider still phase 2). Date: 2026-10-12.
+Status: implemented and released in v1.0.0, later iterations on main (Claude Code provider still phase 2). Date: 2026-10-12.
 Scope: one PR on the asidko/meetily fork. Phase 2 (Claude Code provider) has its contract locked here but ships later.
 
 ## Problem
@@ -17,7 +17,7 @@ While a meeting is being recorded, the user sees only the raw transcript. Everyt
 
 ## Non-goals
 
-- Sentiment, talk-time ratios, live fact checking, running summary, mid-call chat box. Rejected as demo-ware or as hallucination traps for 4B models.
+- Sentiment, talk-time ratios, live fact checking, running summary. Rejected as demo-ware or as hallucination traps for 4B models.
 - Delivery coaching ("slow down"). No diarization exists; not citable.
 - Streaming tokens to the UI. Would need SSE in llm_client plus a new sidecar protocol; suggestions are short, so non-streaming is fine.
 - A second sidecar instance. Doubles RAM for the built-in model.
@@ -30,9 +30,9 @@ Primary user: a participant in work meetings (technical discussions, planning). 
 
 Rejected: concerns and open-loop tracking as separate kinds (follow-up candidates), coaching tips.
 
-### D2. Goal input
+### D2. No goal input
 
-Optional one-line goal in the panel header, empty by default. When empty the model infers the meeting type from the transcript. Editing the goal forces a refresh. No meeting-type dropdown in this version.
+The model infers the meeting type from the transcript. A per-call goal field shipped first and was removed: users do not fill it in during a call.
 
 ### D3. Citations are mandatory
 
@@ -47,16 +47,16 @@ Rust already holds the canonical live transcript (`RecordingSaver.transcript_seg
 - Tick when at least 120 new words since the last tick started, or 90 s elapsed with at least 30 new words.
 - Wait for a 2.5 s gap in `transcript-update` events before firing, max 10 s wait, so the window ends on a segment boundary.
 - Floor between ticks: max(45 s for cloud and Ollama, 90 s for built-in, 2x the last run's duration).
-- Single-flight. A tick due mid-run sets `pending`; when the run ends, the pending tick runs with the transcript as of that moment (coalesced depth 1, never a stale snapshot).
-- Nothing while paused. Manual Refresh bypasses thresholds with a 5 s debounce.
-- Cancel in-flight on stop and pause. HTTP providers also time out after 120 s. A built-in run has no timeout of its own beyond the sidecar's, and cancelling it restarts the sidecar, which is acceptable at stop or pause but not on a timer.
+- Single-flight: the loop runs one tick at a time and the next one reads the transcript as of that moment. When the built-in model is busy, a due tick becomes `pending` and runs once the model is free and the floor has passed.
+- Nothing while paused. Manual Refresh bypasses thresholds and the floor with a 5 s debounce and asks the model for at least one new item. While the built-in model is busy it retries every second instead of becoming a floor-gated pending tick.
+- Cancel in-flight on stop and pause. Every model call (tick or chat answer) times out after 120 s, counted from the request, so a wait for the busy built-in model counts too; a timed-out built-in run restarts the sidecar.
 
 Rejected: fixed 60 s interval (wasteful in silence, flickers), manual only.
 
 ### D6. Context strategy: rolling window plus model-kept state
 
 User message, in this order so the prefix stays stable for caching:
-1. title and goal
+1. title
 2. previous `state` (max 150 tokens), as returned by the model last tick
 3. open suggestions with ids (max 150 tokens)
 4. transcript window as `[mm:ss] text` lines
@@ -64,7 +64,7 @@ User message, in this order so the prefix stays stable for caching:
 Budgets measured with `processor::rough_token_count`:
 - built-in: 2000 in, 400 out; pass the model's `context_size` so the sidecar does not reload
 - Ollama: `METADATA_CACHE.context_size - 800`
-- cloud: 8000 in, grow-only, trim to the last 2000 on overflow
+- cloud: 8000 in, filled with the newest transcript lines that fit
 
 The system prompt is byte-stable. Claude keeps the existing 8192-token `max_tokens`: Claude 5.x models think by default and thinking shares that budget, so a 400-token cap could return no text. `output_config.effort` is not sent because older models the user can pick (Haiku 4.5, Sonnet 4.5) reject it. Prompt caching on Anthropic is a follow-up.
 
@@ -103,19 +103,21 @@ System prompt skeleton (final wording lives in `assistant/prompt.rs`):
 - Rewrite `state` as at most 6 bullets: covered, decided, open.
 - Schema example included verbatim.
 
-Language: meeting summary-language preference if set, else `detect_summary_language` on the window, else UI language. Questions come back in the transcript language so they can be read aloud.
+Language: `detect_summary_language` on the window, else "the transcript's language". Questions come back in the transcript language so they can be read aloud; chat answers use the language of the question.
 
 ### D9. Provider and consent policy
 
-- Feature off by default. One switch enables it for local providers: built-in, Ollama on localhost. An `ollamaEndpoint` that is not localhost counts as cloud.
+- Feature on by default. Local providers run without a prompt: built-in, Ollama on localhost. An `ollamaEndpoint` that is not localhost counts as cloud. A cloud provider sends nothing until confirmed: the session starts paused without an error or toast, and the panel's Allow button (or Confirm in Settings) records consent and resumes it. Until then Pause, Suggest now and chat are disabled.
 - Cloud providers require a one-time per-provider confirmation dialog naming the provider and stating that other participants' words are sent repeatedly during the meeting. Stored per provider; re-confirm on provider change. Summary consent is never inherited.
-- Persistent badge while recording: "Live assistant: sending to <Provider> (<model>)" with Pause. Pause cancels in-flight requests. Local shows "On device".
-- Separate model pick: "Live assistant model" in settings, default "same as summary". Provider config is re-read from the DB on every tick (`model-config-updated` is UI-emitted only).
+- Persistent badge while recording: "Sending to <Provider>", "Needs permission" before consent, "On device" for local providers; the model is in its tooltip. Pause cancels in-flight requests.
+- Model pick in Settings, Summary: a "Same as summary model" checkbox, on by default. Unchecked, it shows provider and model: downloaded built-in models and the Ollama models found at the configured URL come from lists, cloud models are typed. API keys, the Ollama URL and the custom endpoint are shared with the summary model settings, and the panel says which one is used or what is missing. Provider config is re-read from the DB on every tick (`model-config-updated` is UI-emitted only).
 - All calls go through Rust `reqwest`, never from the webview.
 
 ### D10. Sidecar contention
 
-`SidecarManager.send_request` locked stdin and stdout separately, so concurrent callers could cross-wire. It now holds a request mutex for the whole round trip. A live tick that finds the sidecar busy becomes the single pending tick (D5) instead of waiting. Live requests ask for 400 output tokens, not the summary default of 4096.
+`SidecarManager.send_request` locked stdin and stdout separately, so concurrent callers could cross-wire. It now holds a request mutex for the whole round trip. A live tick that finds the sidecar busy becomes the single pending tick (D5) instead of waiting; a manual refresh retries every second. Live requests ask for 400 output tokens, not the summary default of 4096.
+
+A tick or chat answer on a local provider (built-in, Ollama on localhost) holds the transcription worker for its duration. Audio chunks keep queueing in the unbounded channel and are transcribed when the run ends, so whisper and the model stop competing for the GPU and CPU during continuous speech, which previously left a run spinning indefinitely.
 
 ### D11. Failure policy
 
@@ -125,30 +127,36 @@ Existing items stay on screen. Header shows the reason and a Retry button. Expon
 
 - New migration `<timestamp>_add_meeting_suggestions.sql`: `meeting_suggestions(id TEXT PK, meeting_id TEXT, kind TEXT, text TEXT, why TEXT, at_seconds REAL, sequence_id INTEGER, pinned INTEGER, dismissed INTEGER, created_at TEXT)`. Deleted explicitly in `delete_meeting_with_transaction` like the other child tables; the foreign key also cascades.
 - The meeting row exists only after stop, so suggestions live in the session until `useRecordingStop` saves the meeting, then `api_save_meeting_suggestions` runs.
-- Crash recovery bypasses stop: write `suggestions.json` into the meeting folder next to `metadata.json` (atomic tmp + rename) after every successful tick; `useTranscriptRecovery` imports it.
-- Settings in `tauri-plugin-store` `assistant-preferences.json`: `enabled`, `provider`, `model`, `cloud_consent: {provider: bool}`, `last_goal`. Whether the pane is open is a per-window UI preference in `localStorage`. Credentials stay in SQLite `SettingsRepository`.
+- Crash recovery bypasses stop: write `suggestions.json` (suggestions, state, chat) into the meeting folder next to `metadata.json` (atomic tmp + rename) after every successful tick, every chat reply and every pin or dismiss; `useTranscriptRecovery` imports the suggestions.
+- Settings in `tauri-plugin-store` `assistant-preferences.json`: `enabled` (default true), `provider`, `model`, `cloud_consent: {provider: bool}`. Whether the pane is open is a per-window UI preference in `localStorage`. Credentials stay in SQLite `SettingsRepository`.
 - Provider error bodies never reach the UI or logs: an HTTP failure is reported as "Provider returned 401 Unauthorized".
 - Logs never contain prompt, response, or provider error bodies; log provider, model, tick number, duration, item counts.
 
 ### D13. UI
 
 - Right split pane, about 320 px, collapsible to an icon rail that shows the open-item count. Closed by default, state remembered.
-- Pane header: goal field, provider badge, "Updated 40 s ago", Refresh, Pause.
+- Pane header: provider badge, "Updated 40 s ago", Refresh, Pause.
+- Progress bar under the header fills toward the next automatic tick: the share of the word threshold (or the slow-tick path, whichever is further), capped by the time left on the floor. Full means waiting for a pause in speech; a pulsing full bar means the model is running.
 - Items: label Ask or Tip, text, `why` on hover, citation chip. Actions: Pin, Dismiss, Copy. Dismissed ids go back to the model as negative context.
 - New items fade in at the top; order never reshuffles; pinned stay on top.
 - Thinking indicator: pulsing dot in the header, never a spinner over content.
 - Session starts with recording when enabled; the toggle only shows or hides the pane. On reload the pane resyncs via `get_live_assistant_state`.
+- Chat under the suggestions: a text box and Send button (D14). Clicking a suggestion asks about it in the chat.
 - Meeting details: read-only "During call" section under `SummaryPanel` with timestamp links to playback. Pinned items are appended to the summary generation prompt as "Pinned during call".
+
+### D14. Chat
+
+A question goes to the assistant's provider with the title, the model's state notes, the open suggestions, the last 12 chat messages and as much recent transcript as the budget allows. The answer is plain text with [mm:ss] citations that scroll the transcript; a citation that matches no transcript segment is shown as plain text, not a link. One question is in flight at a time and it runs alongside ticks; the built-in sidecar serializes them. Chat lives in the session, survives reload and turning the assistant off and on within a recording, and clears when a new recording starts. A failed answer shows as a red reply and is left out of later prompts.
 
 ## Contracts
 
 ### Rust module `src-tauri/src/assistant/`
 
 - `mod.rs`: module exports and `__cmd__` re-exports, same shape as `summary/mod.rs`.
-- `service.rs`: `AssistantSession { token: CancellationToken, handle: JoinHandle, tick_no, pending, last_sequence_id, goal, state_text, suggestions, failures }`, the tick loop, trigger evaluation, coalescing.
+- `service.rs`: `Session { data, token, notify }` with `SessionData` (suggestions, state notes, chat, progress, pending and failure counters), the tick loop, trigger evaluation, coalescing, chat answers.
 - `prompt.rs`: system and user prompt builders, budget trimming, parser, reconcile (dedupe, resolve, caps, citation snapping).
 - `commands.rs`: Tauri commands below.
-- Managed state: `.manage(assistant::AssistantState(Arc<tokio::Mutex<Option<AssistantSession>>>))`.
+- Managed state: `.manage(assistant::AssistantState::default())`, a mutex over the current `Session` and the last ended session's suggestions and chat.
 
 ### Reuse and small refactors
 
@@ -160,12 +168,13 @@ Existing items stay on screen. Header shows the reason and a Retry button. Expon
 ### Commands
 
 Engine control (plain verbs):
-- `start_live_assistant(goal: Option<String>) -> Result<(), String>`
+- `start_live_assistant() -> Result<(), String>`
 - `refresh_live_assistant() -> Result<(), String>`
 - `pause_live_assistant(paused: bool) -> Result<(), String>`
-- `set_live_assistant_goal(goal: String) -> Result<(), String>`
+- `ask_live_assistant(question: String) -> Result<(), String>`: the question and the answer arrive through `assistant-status`
 - `update_live_suggestion(id: String, pinned: Option<bool>, dismissed: Option<bool>) -> Result<(), String>`
-- `get_live_assistant_state() -> LiveAssistantState { status, goal, provider, model, is_cloud, last_tick_at, error, suggestions }`
+- `get_live_assistant_state() -> LiveAssistantState { active, status, provider, model, is_cloud, last_tick_at, error, tick_no, progress, state, suggestions, chat, chat_pending }`
+- Event `assistant-progress { progress }` (0-100) whenever the fill changes; `assistant-status` carries the full state.
 
 Data (`api_` prefix):
 - `api_get_assistant_settings() -> AssistantSettings`
@@ -215,7 +224,7 @@ claude -p --output-format json --json-schema <schema> --system-prompt <prompt> -
 
 Rust unit tests (inline `#[cfg(test)]`, run with `cargo test -p meetily assistant`):
 - trigger policy: word thresholds, time thresholds, floor, pause, pending coalescing, built-in non-cancel
-- parser: fenced JSON, think blocks, trailing prose, line fallback, unknown fields rejected, length caps
+- parser: fenced JSON, think blocks, trailing prose, line fallback, unknown fields ignored, length caps
 - reconcile: id stability, Jaccard dedupe, two-tick resolve, caps, pinned never resolved, citation snapping and drop
 - budget trimming per provider class
 - language selection order

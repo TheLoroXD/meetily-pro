@@ -7,8 +7,12 @@ export interface AssistantErrorEvent {
 }
 
 export class AssistantService {
-  async start(goal?: string | null): Promise<void> {
-    return invoke('start_live_assistant', { goal: goal ?? null });
+  async start(): Promise<void> {
+    return invoke('start_live_assistant');
+  }
+
+  async ask(question: string): Promise<void> {
+    return invoke('ask_live_assistant', { question });
   }
 
   async refresh(): Promise<void> {
@@ -17,10 +21,6 @@ export class AssistantService {
 
   async setPaused(paused: boolean): Promise<void> {
     return invoke('pause_live_assistant', { paused });
-  }
-
-  async setGoal(goal: string): Promise<void> {
-    return invoke('set_live_assistant_goal', { goal });
   }
 
   async updateSuggestion(id: string, changes: { pinned?: boolean; dismissed?: boolean }): Promise<void> {
@@ -57,6 +57,10 @@ export class AssistantService {
 
   async onStatus(callback: (state: LiveAssistantState) => void): Promise<UnlistenFn> {
     return listen<LiveAssistantState>('assistant-status', (event) => callback(event.payload));
+  }
+
+  async onProgress(callback: (progress: number) => void): Promise<UnlistenFn> {
+    return listen<{ progress: number }>('assistant-progress', (event) => callback(event.payload.progress));
   }
 
   async onError(callback: (event: AssistantErrorEvent) => void): Promise<UnlistenFn> {
