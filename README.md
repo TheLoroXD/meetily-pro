@@ -30,12 +30,12 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 2. Pick a summary engine: built-in local model, Ollama, or a cloud key (OpenAI, Claude, Groq, OpenRouter, custom OpenAI-compatible).
 3. Choose mic and system-audio device, press Record. Stop when done, open the meeting, generate the summary.
 
-## What's new in v1.0.0
+## What's new in v1.1.0
 
-- Live assistant: a side pane while recording suggests questions to ask and facts to clarify, each linked to the moment in the transcript.
-- Pin, dismiss, copy or jump to a suggestion; pinned ones carry into the summary, and the meeting page lists what was suggested during the call.
-- Uses your summary model or a separate one; cloud providers need a one-time confirmation per provider.
-- Includes everything in upstream [v0.4.1](https://github.com/Zackriya-Solutions/meetily/releases/tag/v0.4.1).
+- Live assistant is on by default, with a progress bar showing when the next tip is due; Suggest now always asks for one.
+- Chat with the assistant during the call: answers come from the transcript with clickable timestamps, and clicking a suggestion asks about it.
+- Local models no longer stall during nonstop speech: transcription pauses while the model thinks and catches up after.
+- Clearer assistant settings: a "Same as summary model" checkbox and a line showing which key, URL or server is used. Cloud providers wait for permission given right in the panel.
 
 ## Roadmap
 
