@@ -6,37 +6,14 @@ use std::sync::Mutex;
 
 use super::processor::language_name_from_code;
 
-const SUMMARY_LANGUAGE_FIELD: &str = "summary_language";
 const DETECTED_SUMMARY_LANGUAGE_FIELD: &str = "detected_summary_language";
 const METADATA_FILE: &str = "metadata.json";
 const METADATA_TEMP_FILE_PREFIX: &str = ".metadata.json.";
 static METADATA_WRITE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-pub(crate) fn read_summary_language_from_metadata(folder: &Path) -> Result<Option<String>> {
-    read_language_field_from_metadata(folder, SUMMARY_LANGUAGE_FIELD)
-}
-
 pub(crate) fn read_detected_summary_language_from_metadata(
     folder: &Path,
 ) -> Result<Option<String>> {
-    read_language_field_from_metadata(folder, DETECTED_SUMMARY_LANGUAGE_FIELD)
-}
-
-pub(crate) fn write_summary_language_to_metadata(
-    folder: &Path,
-    summary_language: Option<&str>,
-) -> Result<()> {
-    write_language_field_to_metadata(folder, SUMMARY_LANGUAGE_FIELD, summary_language)
-}
-
-pub(crate) fn write_detected_summary_language_to_metadata(
-    folder: &Path,
-    summary_language: Option<&str>,
-) -> Result<()> {
-    write_language_field_to_metadata(folder, DETECTED_SUMMARY_LANGUAGE_FIELD, summary_language)
-}
-
-fn read_language_field_from_metadata(folder: &Path, field: &str) -> Result<Option<String>> {
     let metadata_path = metadata_path(folder);
     if !metadata_path.exists() {
         return Ok(None);
@@ -46,7 +23,7 @@ fn read_language_field_from_metadata(folder: &Path, field: &str) -> Result<Optio
         .with_context(|| format!("Failed to read {}", metadata_path.display()))?;
     let value = parse_metadata_json(&raw)?;
 
-    let Some(language) = value.get(field) else {
+    let Some(language) = value.get(DETECTED_SUMMARY_LANGUAGE_FIELD) else {
         return Ok(None);
     };
 
@@ -56,9 +33,8 @@ fn read_language_field_from_metadata(folder: &Path, field: &str) -> Result<Optio
     }
 }
 
-fn write_language_field_to_metadata(
+pub(crate) fn write_detected_summary_language_to_metadata(
     folder: &Path,
-    field: &str,
     summary_language: Option<&str>,
 ) -> Result<()> {
     let _guard = METADATA_WRITE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -81,10 +57,13 @@ fn write_language_field_to_metadata(
     match summary_language {
         Some(code) => {
             let normalised = normalise_supported_summary_language(code)?;
-            object.insert(field.to_string(), Value::String(normalised));
+            object.insert(
+                DETECTED_SUMMARY_LANGUAGE_FIELD.to_string(),
+                Value::String(normalised),
+            );
         }
         None => {
-            object.remove(field);
+            object.remove(DETECTED_SUMMARY_LANGUAGE_FIELD);
         }
     }
 
@@ -142,7 +121,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn summary_language_missing_field_returns_none() {
+    fn detected_summary_language_missing_field_returns_none() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("metadata.json"),
@@ -154,11 +133,14 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(read_summary_language_from_metadata(dir.path()).unwrap(), None);
+        assert_eq!(
+            read_detected_summary_language_from_metadata(dir.path()).unwrap(),
+            None
+        );
     }
 
     #[test]
-    fn summary_language_write_preserves_existing_metadata_fields() {
+    fn detected_summary_language_write_preserves_existing_metadata_fields() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("metadata.json"),
@@ -171,43 +153,22 @@ mod tests {
         )
         .unwrap();
 
-        write_summary_language_to_metadata(dir.path(), Some("fr")).unwrap();
+        write_detected_summary_language_to_metadata(dir.path(), Some("fr")).unwrap();
 
         let raw = std::fs::read_to_string(dir.path().join("metadata.json")).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(parsed["version"], "1.0");
         assert_eq!(parsed["meeting_id"], "meeting-123");
         assert_eq!(parsed["meeting_name"], "Design Review");
-        assert_eq!(parsed["summary_language"], "fr");
-    }
-
-    #[test]
-    fn detected_summary_language_is_stored_separately_from_user_override() {
-        let dir = tempfile::tempdir().unwrap();
-
-        write_detected_summary_language_to_metadata(dir.path(), Some("es")).unwrap();
-        write_summary_language_to_metadata(dir.path(), Some("fr")).unwrap();
-
+        assert_eq!(parsed["detected_summary_language"], "fr");
         assert_eq!(
             read_detected_summary_language_from_metadata(dir.path()).unwrap(),
-            Some("es".to_string())
-        );
-        assert_eq!(
-            read_summary_language_from_metadata(dir.path()).unwrap(),
             Some("fr".to_string())
         );
-
-        write_summary_language_to_metadata(dir.path(), None).unwrap();
-
-        assert_eq!(
-            read_detected_summary_language_from_metadata(dir.path()).unwrap(),
-            Some("es".to_string())
-        );
-        assert_eq!(read_summary_language_from_metadata(dir.path()).unwrap(), None);
     }
 
     #[test]
-    fn concurrent_summary_language_writes_preserve_both_fields() {
+    fn concurrent_detected_summary_language_writes_keep_metadata_valid() {
         for _ in 0..50 {
             let dir = tempfile::tempdir().unwrap();
             std::fs::write(
@@ -222,29 +183,30 @@ mod tests {
             )
             .unwrap();
 
-            let summary_dir = dir.path().to_path_buf();
-            let detected_dir = dir.path().to_path_buf();
+            let first_dir = dir.path().to_path_buf();
+            let second_dir = dir.path().to_path_buf();
 
-            let summary_thread = std::thread::spawn(move || {
-                write_summary_language_to_metadata(&summary_dir, Some("fr")).unwrap();
+            let first_thread = std::thread::spawn(move || {
+                write_detected_summary_language_to_metadata(&first_dir, Some("fr")).unwrap();
             });
-            let detected_thread = std::thread::spawn(move || {
-                write_detected_summary_language_to_metadata(&detected_dir, Some("es")).unwrap();
+            let second_thread = std::thread::spawn(move || {
+                write_detected_summary_language_to_metadata(&second_dir, Some("es")).unwrap();
             });
 
-            summary_thread.join().unwrap();
-            detected_thread.join().unwrap();
+            first_thread.join().unwrap();
+            second_thread.join().unwrap();
 
             let raw = std::fs::read_to_string(dir.path().join("metadata.json")).unwrap();
             let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
-            assert_eq!(parsed["summary_language"], "fr");
-            assert_eq!(parsed["detected_summary_language"], "es");
+            let detected = parsed["detected_summary_language"].as_str().unwrap();
+            assert!(detected == "fr" || detected == "es");
             assert_eq!(parsed["meeting_name"], "Design Review");
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
         }
     }
 
     #[test]
-    fn summary_language_temp_path_is_unique_per_write() {
+    fn detected_summary_language_temp_path_is_unique_per_write() {
         let dir = tempfile::tempdir().unwrap();
 
         let first = metadata_temp_path(dir.path());
@@ -256,41 +218,43 @@ mod tests {
     }
 
     #[test]
-    fn summary_language_null_removes_existing_field() {
+    fn detected_summary_language_null_removes_existing_field() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("metadata.json"),
             serde_json::to_string_pretty(&json!({
                 "version": "1.0",
-                "summary_language": "de"
+                "detected_summary_language": "de"
             }))
             .unwrap(),
         )
         .unwrap();
 
-        write_summary_language_to_metadata(dir.path(), None).unwrap();
+        write_detected_summary_language_to_metadata(dir.path(), None).unwrap();
 
         let raw = std::fs::read_to_string(dir.path().join("metadata.json")).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        assert!(parsed.get("summary_language").is_none());
+        assert!(parsed.get("detected_summary_language").is_none());
+        assert_eq!(parsed["version"], "1.0");
     }
 
     #[test]
-    fn summary_language_rejects_unsupported_code() {
+    fn detected_summary_language_rejects_unsupported_code() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("metadata.json"), "{}").unwrap();
 
-        let err = write_summary_language_to_metadata(dir.path(), Some("xx")).unwrap_err();
+        let err =
+            write_detected_summary_language_to_metadata(dir.path(), Some("xx")).unwrap_err();
 
         assert!(err.to_string().contains("Unsupported summary language"));
     }
 
     #[test]
-    fn summary_language_malformed_metadata_returns_error() {
+    fn detected_summary_language_malformed_metadata_returns_error() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("metadata.json"), "{").unwrap();
 
-        let err = read_summary_language_from_metadata(dir.path()).unwrap_err();
+        let err = read_detected_summary_language_from_metadata(dir.path()).unwrap_err();
 
         assert!(err.to_string().contains("Failed to parse metadata.json"));
     }

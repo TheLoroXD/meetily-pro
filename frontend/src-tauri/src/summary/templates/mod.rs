@@ -16,16 +16,13 @@
 //! use app_lib::summary::templates;
 //!
 //! // Load a specific template
-//! let template = templates::get_template("daily_standup").expect("daily standup template exists");
+//! let template = templates::get_template("standard_meeting").expect("standard meeting template exists");
 //!
 //! // Generate markdown structure
 //! let markdown = template.to_markdown_structure();
 //!
 //! // Generate LLM instructions
 //! let instructions = template.to_section_instructions();
-//!
-//! // List available templates
-//! let available = templates::list_templates();
 //! ```
 //!
 //! # Custom Templates
@@ -42,10 +39,7 @@ mod loader;
 mod types;
 
 // Re-export public API
-pub use loader::{
-    get_template, list_template_ids, list_templates, set_bundled_templates_dir,
-    validate_and_parse_template,
-};
+pub use loader::{get_template, list_template_ids, set_bundled_templates_dir};
 pub use types::{Template, TemplateSection};
 
 #[cfg(test)]
@@ -66,18 +60,6 @@ mod tests {
                 id,
                 result.err()
             );
-        }
-    }
-
-    #[test]
-    fn test_template_metadata() {
-        let templates = list_templates();
-        assert!(!templates.is_empty());
-
-        for (id, name, description) in templates {
-            assert!(!id.is_empty());
-            assert!(!name.is_empty());
-            assert!(!description.is_empty());
         }
     }
 }

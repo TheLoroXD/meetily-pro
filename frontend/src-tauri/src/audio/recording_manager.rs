@@ -461,11 +461,6 @@ impl RecordingManager {
         self.state.is_active()
     }
 
-    /// Get recording statistics
-    pub fn get_stats(&self) -> super::recording_state::RecordingStats {
-        self.state.get_stats()
-    }
-
     /// Get recording duration
     pub fn get_recording_duration(&self) -> Option<f64> {
         self.state.get_recording_duration()
@@ -502,11 +497,6 @@ impl RecordingManager {
         F: Fn(&super::recording_state::AudioError) + Send + Sync + 'static,
     {
         self.state.set_error_callback(callback);
-    }
-
-    /// Check if there's a fatal error
-    pub fn has_fatal_error(&self) -> bool {
-        self.state.has_fatal_error()
     }
 
     /// Set the meeting name for this recording session

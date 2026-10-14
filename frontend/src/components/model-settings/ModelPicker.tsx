@@ -3,21 +3,14 @@
 import { useState } from 'react';
 import { Check, ChevronsUpDown, AlertTriangle } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from '@/components/ui/command';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { cn } from '@/lib/utils';
 import { availability, catalogLabel, choiceKey, readyGroups, type Catalog, type CatalogProvider, type ModelChoice } from '@/lib/model-catalog';
-
-interface PickerExtra {
-  label: string;
-  selected: boolean;
-  onSelect: () => void;
-}
 
 interface ModelPickerProps {
   catalog: Catalog;
   providers: CatalogProvider[];
   value: ModelChoice | null;
-  extra?: PickerExtra;
   onChange: (choice: ModelChoice) => void;
   emptyText: string;
   setUpText: string;
@@ -26,21 +19,18 @@ interface ModelPickerProps {
   disabledReason?: string;
 }
 
-export function ModelPicker({ catalog, providers, value, extra, onChange, emptyText, setUpText, onSetUp, disabled, disabledReason }: ModelPickerProps) {
+export function ModelPicker({ catalog, providers, value, onChange, emptyText, setUpText, onSetUp, disabled, disabledReason }: ModelPickerProps) {
   const [open, setOpen] = useState(false);
   const groups = readyGroups(catalog, providers);
   const total = groups.reduce((sum, group) => sum + group.models.length, 0);
   const loading = providers.some((provider) => !catalog[provider] || catalog[provider]?.status === 'loading');
-  const extraSelected = !!extra?.selected;
-  const state = extraSelected ? { kind: 'ready' as const } : availability(catalog, value);
+  const state = availability(catalog, value);
   const selectedKey = value ? choiceKey(value) : '';
-  const empty = total === 0 && !extra;
+  const empty = total === 0;
 
-  const triggerText = extraSelected && extra
-    ? extra.label
-    : value?.model
-      ? `${catalogLabel(value.provider)} - ${value.model}`
-      : empty && !loading ? emptyText : 'Pick a model';
+  const triggerText = value?.model
+    ? `${catalogLabel(value.provider)} - ${value.model}`
+    : empty && !loading ? emptyText : 'Pick a model';
 
   return (
     <div className="space-y-1.5">
@@ -67,22 +57,11 @@ export function ModelPicker({ catalog, providers, value, extra, onChange, emptyT
             <CommandInput placeholder="Search models..." />
             <CommandList className="max-h-72">
               <CommandEmpty>No model found.</CommandEmpty>
-              {extra && (
-                <>
-                  <CommandGroup>
-                    <CommandItem value={extra.label} onSelect={() => { extra.onSelect(); setOpen(false); }}>
-                      <Check className={cn('mr-2 h-4 w-4', extraSelected ? 'opacity-100' : 'opacity-0')} />
-                      {extra.label}
-                    </CommandItem>
-                  </CommandGroup>
-                  {groups.length > 0 && <CommandSeparator />}
-                </>
-              )}
               {groups.map((group) => (
                 <CommandGroup key={group.provider} heading={catalogLabel(group.provider)}>
                   {group.models.map((model) => {
                     const choice = { provider: group.provider, model };
-                    const selected = !extraSelected && choiceKey(choice) === selectedKey;
+                    const selected = choiceKey(choice) === selectedKey;
                     return (
                       <CommandItem key={choiceKey(choice)} value={`${catalogLabel(group.provider)} ${model}`} onSelect={() => { onChange(choice); setOpen(false); }}>
                         <Check className={cn('mr-2 h-4 w-4', selected ? 'opacity-100' : 'opacity-0')} />

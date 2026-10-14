@@ -6,13 +6,12 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { ConfirmationModal } from '../ConfirmationModel/confirmation-modal';
-import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
+import { getVersion } from '@tauri-apps/api/app';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
-import { useConfig } from '@/contexts/ConfigContext';
 
 import {
   Dialog,
@@ -56,9 +55,13 @@ const Sidebar: React.FC = () => {
   // Get recording state from RecordingStateContext (single source of truth)
   const { isRecording } = useRecordingState();
   const { openImportDialog } = useImportDialog();
-  const { betaFeatures } = useConfig();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [appVersion, setAppVersion] = useState('');
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => undefined);
+  }, []);
 
   // State for edit modal
   const [editModalState, setEditModalState] = useState<{ isOpen: boolean; meetingId: string | null; currentTitle: string }>({
@@ -175,9 +178,6 @@ const Sidebar: React.FC = () => {
       const updatedMeetings = meetings.filter((m: CurrentMeeting) => m.id !== itemId);
       setMeetings(updatedMeetings);
 
-      // Track meeting deletion
-      Analytics.trackMeetingDeleted(itemId);
-
       // Show success toast
       toast.success("Meeting deleted successfully", {
         description: "All associated data has been removed"
@@ -241,9 +241,6 @@ const Sidebar: React.FC = () => {
       if (currentMeeting?.id === meetingId) {
         setCurrentMeeting({ id: meetingId, title: newTitle });
       }
-
-      // Track the edit
-      Analytics.trackButtonClick('edit_meeting_title', 'sidebar');
 
       toast.success("Meeting title updated successfully");
 
@@ -320,21 +317,19 @@ const Sidebar: React.FC = () => {
             </TooltipContent>
           </Tooltip>
 
-          {betaFeatures.importAndRetranscribe && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => openImportDialog()}
-                  className="p-2 rounded-lg transition-colors duration-150 hover:bg-blue-100 bg-blue-50"
-                >
-                  <Upload className="w-5 h-5 text-blue-600" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                <p>Import Audio</p>
-              </TooltipContent>
-            </Tooltip>
-          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => openImportDialog()}
+                className="p-2 rounded-lg transition-colors duration-150 hover:bg-blue-100 bg-blue-50"
+              >
+                <Upload className="w-5 h-5 text-blue-600" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Import Audio</p>
+            </TooltipContent>
+          </Tooltip>
 
           <Tooltip>
             <TooltipTrigger asChild>
@@ -622,15 +617,13 @@ const Sidebar: React.FC = () => {
               )}
             </button>
 
-            {betaFeatures.importAndRetranscribe && (
-              <button
-                onClick={() => openImportDialog()}
-                className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-gray-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors shadow-sm"
-              >
-                <Upload className="w-4 h-4 mr-2" />
-                <span>Import Audio</span>
-              </button>
-            )}
+            <button
+              onClick={() => openImportDialog()}
+              className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-gray-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors shadow-sm"
+            >
+              <Upload className="w-4 h-4 mr-2" />
+              <span>Import Audio</span>
+            </button>
 
             <button
               onClick={() => router.push('/settings')}
@@ -641,7 +634,7 @@ const Sidebar: React.FC = () => {
             </button>
             <Info isCollapsed={isCollapsed} />
             <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-gray-400">
-              v0.4.1
+              {appVersion && `v${appVersion}`}
             </div>
           </div>
         )}

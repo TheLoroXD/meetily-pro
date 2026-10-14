@@ -33,7 +33,7 @@ export interface VirtualizedTranscriptViewProps {
     isLoadingMore?: boolean;
     totalCount?: number;
     loadedCount?: number;
-    onLoadMore?: () => void;
+    onLoadMore?: (all?: boolean) => void;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -173,31 +173,53 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         enableStreaming
     );
 
+    const pendingTargetRef = useRef<{ atSeconds: number; loadedCount: number } | null>(null);
+    const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const loadMoreRef = useRef({ hasMore, isLoadingMore, onLoadMore });
+    loadMoreRef.current = { hasMore, isLoadingMore, onLoadMore };
+
+    const showSegmentAt = useCallback((atSeconds: number) => {
+        const current = segmentsRef.current;
+        if (current.length === 0) return;
+        const loaded = loadMoreRef.current;
+        const last = current[current.length - 1];
+        const pending = pendingTargetRef.current;
+        const grewSinceLoad = !pending || current.length > pending.loadedCount;
+        if (atSeconds > (last.endTime ?? last.timestamp ?? 0) && loaded.hasMore && loaded.onLoadMore && grewSinceLoad) {
+            pendingTargetRef.current = { atSeconds, loadedCount: current.length };
+            if (!loaded.isLoadingMore) loaded.onLoadMore(true);
+            return;
+        }
+        pendingTargetRef.current = null;
+        let index = 0;
+        let best = Number.POSITIVE_INFINITY;
+        current.forEach((segment, i) => {
+            const distance = Math.abs((segment.timestamp ?? 0) - atSeconds);
+            if (distance < best) {
+                best = distance;
+                index = i;
+            }
+        });
+        setHighlightedId(current[index].id);
+        if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = setTimeout(() => setHighlightedId(null), 2500);
+    }, []);
+
     useEffect(() => {
-        let timer: ReturnType<typeof setTimeout> | null = null;
         const handler = (event: Event) => {
             const atSeconds = (event as CustomEvent<{ atSeconds: number }>).detail?.atSeconds;
-            const current = segmentsRef.current;
-            if (typeof atSeconds !== 'number' || current.length === 0) return;
-            let index = 0;
-            let best = Number.POSITIVE_INFINITY;
-            current.forEach((segment, i) => {
-                const distance = Math.abs((segment.timestamp ?? 0) - atSeconds);
-                if (distance < best) {
-                    best = distance;
-                    index = i;
-                }
-            });
-            setHighlightedId(current[index].id);
-            if (timer) clearTimeout(timer);
-            timer = setTimeout(() => setHighlightedId(null), 2500);
+            if (typeof atSeconds === 'number') showSegmentAt(atSeconds);
         };
         window.addEventListener(SCROLL_TO_SEGMENT_EVENT, handler);
         return () => {
             window.removeEventListener(SCROLL_TO_SEGMENT_EVENT, handler);
-            if (timer) clearTimeout(timer);
+            if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
         };
-    }, []);
+    }, [showSegmentAt]);
+
+    useEffect(() => {
+        if (pendingTargetRef.current !== null && !isLoadingMore) showSegmentAt(pendingTargetRef.current.atSeconds);
+    }, [segments, isLoadingMore, showSegmentAt]);
 
     // Infinite scroll: IntersectionObserver to trigger loading more
     useEffect(() => {

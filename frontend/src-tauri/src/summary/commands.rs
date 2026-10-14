@@ -4,8 +4,7 @@ use crate::database::repositories::{
 };
 use crate::state::AppState;
 use crate::summary::metadata::{
-    read_detected_summary_language_from_metadata, read_summary_language_from_metadata,
-    write_detected_summary_language_to_metadata, write_summary_language_to_metadata,
+    read_detected_summary_language_from_metadata, write_detected_summary_language_to_metadata,
 };
 use crate::summary::language_detection::{
     detect_summary_language, SummaryLanguageDetection,
@@ -86,94 +85,6 @@ impl MeetingSummaryLanguagePreference {
 enum MeetingFolderResolution {
     Folder(PathBuf),
     NoFolder,
-}
-
-/// Saves a meeting summary (Native SQLx implementation)
-///
-/// Expected format: { "markdown": "...", "summary_json": [...BlockNote blocks...] }
-#[tauri::command]
-pub async fn api_save_meeting_summary<R: Runtime>(
-    _app: AppHandle<R>,
-    state: tauri::State<'_, AppState>,
-    meeting_id: String,
-    summary: serde_json::Value,
-    _auth_token: Option<String>,
-) -> Result<serde_json::Value, String> {
-    log_info!(
-        "api_save_meeting_summary (native) called for meeting_id: {}",
-        meeting_id
-    );
-    if !summary_is_renderable(&summary) {
-        return Err("Summary contains no visible content or model reasoning markers and was not saved.".into());
-    }
-    let pool = state.db_manager.pool();
-
-
-    match SummaryProcessesRepository::update_meeting_summary(pool, &meeting_id, &summary).await {
-        Ok(true) => {
-            log_info!("Summary saved successfully for meeting_id: {}", meeting_id);
-            Ok(serde_json::json!({
-                "message": "Meeting summary saved successfully"
-            }))
-        }
-        Ok(false) => {
-            log_warn!(
-                "Meeting not found or invalid JSON for meeting_id: {}",
-                meeting_id
-            );
-            Err("Meeting not found or can't convert the json".into())
-        }
-        Err(e) => {
-            log_error!("Failed to save meeting summary for {}: {}", meeting_id, e);
-            Err(e.to_string())
-        }
-    }
-}
-
-/// Gets the per-meeting summary language override from metadata.json.
-#[tauri::command]
-pub async fn api_get_meeting_summary_language<R: Runtime>(
-    _app: AppHandle<R>,
-    state: tauri::State<'_, AppState>,
-    meeting_id: String,
-) -> Result<MeetingSummaryLanguagePreference, String> {
-    log_info!(
-        "api_get_meeting_summary_language called for meeting_id: {}",
-        meeting_id
-    );
-
-    match resolve_meeting_folder(state.db_manager.pool(), &meeting_id).await? {
-        MeetingFolderResolution::Folder(folder) => read_summary_language_from_metadata(&folder)
-            .map(MeetingSummaryLanguagePreference::metadata)
-            .map_err(|e| e.to_string()),
-        MeetingFolderResolution::NoFolder => Ok(MeetingSummaryLanguagePreference::local_fallback()),
-    }
-}
-
-/// Saves or clears the per-meeting summary language override in metadata.json.
-#[tauri::command]
-pub async fn api_save_meeting_summary_language<R: Runtime>(
-    _app: AppHandle<R>,
-    state: tauri::State<'_, AppState>,
-    meeting_id: String,
-    summary_language: Option<String>,
-) -> Result<MeetingSummaryLanguagePreference, String> {
-    log_info!(
-        "api_save_meeting_summary_language called for meeting_id: {}, language: {:?}",
-        meeting_id,
-        summary_language
-    );
-
-    match resolve_meeting_folder(state.db_manager.pool(), &meeting_id).await? {
-        MeetingFolderResolution::Folder(folder) => {
-            write_summary_language_to_metadata(&folder, summary_language.as_deref())
-                .map_err(|e| e.to_string())?;
-            read_summary_language_from_metadata(&folder)
-                .map(MeetingSummaryLanguagePreference::metadata)
-                .map_err(|e| e.to_string())
-        }
-        MeetingFolderResolution::NoFolder => Ok(MeetingSummaryLanguagePreference::local_fallback()),
-    }
 }
 
 /// Gets the cached Auto-detected summary language from metadata.json.
@@ -484,7 +395,7 @@ pub async fn api_process_transcript<R: Runtime>(
 
     let pool = state.db_manager.pool().clone();
     let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
-    let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
+    let final_template_id = template_id.unwrap_or_else(|| "standard_meeting".to_string());
 
     // Normalise empty / whitespace-only to None so "" and null behave identically
     let summary_language = summary_language.and_then(|s| {

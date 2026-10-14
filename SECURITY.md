@@ -6,7 +6,7 @@ Only the latest release on the `main` branch receives fixes.
 
 ## Reporting a vulnerability
 
-Use GitHub private vulnerability reporting: https://github.com/asidko/meetily/security/advisories/new
+Use GitHub private vulnerability reporting: https://github.com/asidko/meetily-pro/security/advisories/new
 
 Do not open a public issue for security problems. Expect an acknowledgement within 7 days.
 

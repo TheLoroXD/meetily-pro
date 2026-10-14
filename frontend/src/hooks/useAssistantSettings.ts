@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import { assistantService } from '@/services/assistantService';
 import type { AssistantSettings } from '@/lib/live-assistant';
 
-const DEFAULT_SETTINGS: AssistantSettings = { enabled: true, provider: null, model: null, cloud_consent: {} };
+const DEFAULT_SETTINGS: AssistantSettings = { enabled: true, cloud_consent: {} };
 
 export function useAssistantSettings() {
   const [settings, setSettings] = useState<AssistantSettings>(DEFAULT_SETTINGS);

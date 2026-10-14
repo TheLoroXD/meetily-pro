@@ -1,9 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { normaliseLanguageCode } from '@/lib/summary-languages';
 
-export const SUMMARY_LANGUAGE_RECENTS_KEY = 'summaryLanguageRecents';
-export const SUMMARY_LANGUAGE_DEFAULT_KEY = 'summaryLanguageDefault';
-const SUMMARY_LANGUAGE_FALLBACK_PREFIX = 'summaryLanguageFallback';
 const DETECTED_SUMMARY_LANGUAGE_FALLBACK_PREFIX = 'detectedSummaryLanguageFallback';
 
 export type SummaryLanguageStorage = 'metadata' | 'local_fallback';
@@ -28,25 +25,6 @@ export type SummaryLanguageDetectionReason =
 export interface SummaryLanguageDetectionResult {
   language: string | null;
   reason: SummaryLanguageDetectionReason;
-}
-
-export function readPinnedSummaryLanguageDefault(): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    return normaliseLanguageCode(window.localStorage.getItem(SUMMARY_LANGUAGE_DEFAULT_KEY));
-  } catch {
-    return null;
-  }
-}
-
-export function writePinnedSummaryLanguageDefault(value: string | null): void {
-  if (typeof window === 'undefined') return;
-  try {
-    if (value) window.localStorage.setItem(SUMMARY_LANGUAGE_DEFAULT_KEY, value);
-    else window.localStorage.removeItem(SUMMARY_LANGUAGE_DEFAULT_KEY);
-  } catch {
-    // Preference writes are non-critical; meeting-specific persistence happens separately.
-  }
 }
 
 function fallbackKey(prefix: string, meetingId: string): string {
@@ -94,64 +72,6 @@ function normalisePreferenceResponse(
     language: normaliseLanguageCode(raw),
     storage: 'metadata',
   };
-}
-
-export async function readMeetingSummaryLanguage(
-  meetingId: string
-): Promise<MeetingSummaryLanguagePreference> {
-  const response = normalisePreferenceResponse(
-    await invoke<RawMeetingSummaryLanguagePreference>('api_get_meeting_summary_language', {
-      meetingId,
-    })
-  );
-
-  if (response.storage === 'local_fallback') {
-    return {
-      language: readLanguageFallback(SUMMARY_LANGUAGE_FALLBACK_PREFIX, meetingId),
-      storage: 'local_fallback',
-    };
-  }
-
-  writeLanguageFallback(SUMMARY_LANGUAGE_FALLBACK_PREFIX, meetingId, null);
-  return response;
-}
-
-export async function saveMeetingSummaryLanguage(
-  meetingId: string,
-  language: string | null
-): Promise<MeetingSummaryLanguagePreference> {
-  const normalised = language ? normaliseLanguageCode(language) : null;
-  const response = normalisePreferenceResponse(
-    await invoke<RawMeetingSummaryLanguagePreference>('api_save_meeting_summary_language', {
-      meetingId,
-      summaryLanguage: normalised,
-    })
-  );
-
-  if (response.storage === 'local_fallback') {
-    if (!writeLanguageFallback(SUMMARY_LANGUAGE_FALLBACK_PREFIX, meetingId, normalised)) {
-      throw new Error('Failed to save summary language on this device');
-    }
-    return {
-      language: normalised,
-      storage: 'local_fallback',
-    };
-  }
-
-  writeLanguageFallback(SUMMARY_LANGUAGE_FALLBACK_PREFIX, meetingId, null);
-  return {
-    language: normaliseLanguageCode(response.language ?? normalised),
-    storage: 'metadata',
-  };
-}
-
-export async function applyPinnedSummaryLanguageToMeeting(meetingId: string): Promise<string | null> {
-  const pinned = readPinnedSummaryLanguageDefault();
-  if (!pinned) return null;
-
-  await saveMeetingSummaryLanguage(meetingId, pinned);
-
-  return pinned;
 }
 
 export async function readCachedDetectedSummaryLanguage(meetingId: string): Promise<string | null> {

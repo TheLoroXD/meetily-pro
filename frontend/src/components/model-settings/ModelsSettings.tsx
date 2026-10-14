@@ -7,8 +7,8 @@ import { useAssistantSettings } from '@/hooks/useAssistantSettings';
 import { SPEECH_PROVIDERS, TEXT_PROVIDERS, type CatalogProvider } from '@/lib/model-catalog';
 import { ProvidersSection } from './ProvidersSection';
 import { VoiceModelPicker } from './VoiceModelPicker';
-import { SummaryModelPicker } from './SummaryModelPicker';
-import { AssistantModelSettings } from './AssistantModelSettings';
+import { AiModelPicker } from './AiModelPicker';
+import { LiveAssistantSettings } from './LiveAssistantSettings';
 
 const ALL_PROVIDERS: CatalogProvider[] = [...SPEECH_PROVIDERS, ...TEXT_PROVIDERS];
 
@@ -33,33 +33,21 @@ export function ModelsSettings() {
     requestAnimationFrame(() => document.getElementById(`provider-${provider}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }, []);
 
-  const inUseBy = (provider: string) => {
-    const users: string[] = [];
-    if (modelConfig.provider === provider) users.push('Summaries');
-    if ((assistant.settings.provider ?? modelConfig.provider) === provider) users.push('The live assistant');
-    return users;
-  };
-
-  const customServerSaved = (model: string) => {
-    refresh(['custom-openai']);
-    if (assistant.settings.provider === 'custom-openai' && assistant.settings.model !== model) {
-      assistant.persist({ ...assistant.settings, model });
-    }
-  };
+  const inUseBy = (provider: string) => (modelConfig.provider === provider ? ['Summaries and the assistant'] : []);
 
   return (
     <div className="flex flex-col gap-6">
       <Section title="Providers" description="Set up each source once. Models you add here show up in the pickers below.">
-        <ProvidersSection catalog={catalog} refresh={refresh} open={open} onOpenChange={setOpen} inUseBy={inUseBy} onCustomServerSaved={customServerSaved} />
+        <ProvidersSection catalog={catalog} refresh={refresh} open={open} onOpenChange={setOpen} inUseBy={inUseBy} onCustomServerSaved={() => refresh(['custom-openai'])} />
       </Section>
       <Section title="Voice transcript model" description="Turns speech into text while you record.">
         <VoiceModelPicker catalog={catalog} onSetUp={() => showProvider('parakeet')} />
       </Section>
-      <Section title="Summary model" description="Writes the summary after a meeting.">
-        <SummaryModelPicker catalog={catalog} onSetUp={() => showProvider('builtin-ai')} />
-      </Section>
-      <Section title="AI assistant model" description="Suggests questions and answers your questions during a call.">
-        <AssistantModelSettings catalog={catalog} onSetUp={() => showProvider('builtin-ai')} {...assistant} />
+      <Section title="AI model" description="Writes meeting summaries and answers your questions during and after a call.">
+        <div className="space-y-4">
+          <AiModelPicker catalog={catalog} onSetUp={() => showProvider('builtin-ai')} />
+          <LiveAssistantSettings {...assistant} />
+        </div>
       </Section>
     </div>
   );

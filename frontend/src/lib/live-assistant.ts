@@ -37,10 +37,13 @@ export interface LiveAssistantState {
   chat_pending: boolean;
 }
 
+export interface MeetingChat {
+  messages: ChatMessage[];
+  answering: boolean;
+}
+
 export interface AssistantSettings {
   enabled: boolean;
-  provider: string | null;
-  model: string | null;
   cloud_consent: Record<string, boolean>;
 }
 

@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import type { AssistantSettings, LiveAssistantState, Suggestion } from '@/lib/live-assistant';
+import type { AssistantSettings, ChatMessage, LiveAssistantState, MeetingChat, Suggestion } from '@/lib/live-assistant';
 
 export interface AssistantErrorEvent {
   message: string | null;
@@ -47,12 +47,20 @@ export class AssistantService {
     return invoke<Suggestion[]>('api_get_meeting_suggestions', { meetingId });
   }
 
-  async saveMeetingSuggestions(meetingId: string): Promise<number> {
-    return invoke<number>('api_save_meeting_suggestions', { meetingId });
+  async saveMeetingAssistant(meetingId: string): Promise<void> {
+    return invoke('api_save_meeting_assistant', { meetingId });
   }
 
-  async importSnapshot(meetingId: string, folder: string): Promise<number> {
-    return invoke<number>('api_import_assistant_snapshot', { meetingId, folder });
+  async importSnapshot(meetingId: string, folder: string): Promise<void> {
+    return invoke('api_import_assistant_snapshot', { meetingId, folder });
+  }
+
+  async getMeetingChat(meetingId: string): Promise<MeetingChat> {
+    return invoke<MeetingChat>('api_get_meeting_chat', { meetingId });
+  }
+
+  async askAboutMeeting(meetingId: string, question: string): Promise<ChatMessage[]> {
+    return invoke<ChatMessage[]>('api_ask_meeting_assistant', { meetingId, question });
   }
 
   async onStatus(callback: (state: LiveAssistantState) => void): Promise<UnlistenFn> {

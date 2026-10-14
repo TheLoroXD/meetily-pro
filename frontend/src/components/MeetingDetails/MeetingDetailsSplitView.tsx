@@ -10,7 +10,7 @@ const MAX_RATIO = 0.5;
 
 const TABS = [
   { value: 'transcript' as const, label: 'Transcript', icon: FileText },
-  { value: 'summary' as const, label: 'Summary', icon: Sparkles },
+  { value: 'assistant' as const, label: 'Assistant', icon: Sparkles },
 ];
 
 function readStoredRatio(): number {
@@ -32,18 +32,18 @@ function writeStoredRatio(value: number): void {
   }
 }
 
-export type MeetingDetailsTab = 'transcript' | 'summary';
+export type MeetingDetailsTab = 'transcript' | 'assistant';
 
 interface MeetingDetailsSplitViewProps {
   transcript: ReactNode;
-  summary: ReactNode;
+  assistant: ReactNode;
   activeTab: MeetingDetailsTab;
   onTabChange: (tab: MeetingDetailsTab) => void;
 }
 
 export function MeetingDetailsSplitView({
   transcript,
-  summary,
+  assistant,
   activeTab,
   onTabChange,
 }: MeetingDetailsSplitViewProps) {
@@ -103,8 +103,8 @@ export function MeetingDetailsSplitView({
   const transcriptPanelProps = isDesktop
     ? { role: 'region' as const, 'aria-label': 'Transcript', tabIndex: -1 }
     : {};
-  const summaryPanelProps = isDesktop
-    ? { role: 'region' as const, 'aria-label': 'Summary', tabIndex: -1 }
+  const assistantPanelProps = isDesktop
+    ? { role: 'region' as const, 'aria-label': 'Assistant', tabIndex: -1 }
     : {};
 
   return (
@@ -153,7 +153,7 @@ export function MeetingDetailsSplitView({
           aria-valuemin={Math.round(MIN_RATIO * 100)}
           aria-valuemax={Math.round(MAX_RATIO * 100)}
           aria-valuetext={`Transcript panel ${Math.round(ratio * 100)} percent`}
-          aria-label="Resize transcript and summary"
+          aria-label="Resize transcript and assistant"
           tabIndex={0}
           className="group relative z-10 hidden w-2 flex-shrink-0 cursor-col-resize items-stretch justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset md:flex"
           onPointerDown={onPointerDown}
@@ -162,12 +162,12 @@ export function MeetingDetailsSplitView({
           <div className="h-full w-px bg-gray-200 transition-[width,background-color] duration-150 ease-out group-hover:w-1 group-hover:bg-blue-400 group-active:w-1 group-active:bg-blue-500" />
         </div>
         <TabsContent
-          value="summary"
+          value="assistant"
           forceMount
           className="mt-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden md:data-[state=inactive]:flex"
-          {...summaryPanelProps}
+          {...assistantPanelProps}
         >
-          {summary}
+          {assistant}
         </TabsContent>
       </div>
     </Tabs>

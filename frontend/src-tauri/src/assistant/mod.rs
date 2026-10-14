@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod meeting_chat;
 pub mod prompt;
 pub mod service;
 pub mod settings;

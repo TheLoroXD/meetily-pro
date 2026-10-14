@@ -1,22 +1,11 @@
 # Meeting Summary Templates
 
-This directory contains template definitions for meeting summary generation.
+This directory contains the template definition for meeting summary generation.
 
 ## Available Templates
 
-### 1. `daily_standup.json`
-Time-boxed daily updates template designed for engineering/product teams.
-
-**Sections:**
-- Date
-- Attendees
-- Yesterday (completed work)
-- Today (planned work)
-- Blockers
-- Notes
-
-### 2. `standard_meeting.json`
-General-purpose meeting notes template focusing on key outcomes and actions.
+### `standard_meeting.json`
+General-purpose meeting notes template focusing on key outcomes and actions. Every summary uses it.
 
 **Sections:**
 - Summary
@@ -45,13 +34,13 @@ Each template JSON file follows this schema:
 
 ## Custom Templates
 
-Users can add custom templates to the application data directory:
+Users can override the standard template by placing a `standard_meeting.json` in the application data directory:
 
 - **macOS**: `~/Library/Application Support/Meetily/templates/`
 - **Windows**: `%APPDATA%\Meetily\templates\`
 - **Linux**: `~/.config/Meetily/templates/`
 
-Custom templates override built-in templates with the same filename.
+A file there replaces the bundled template with the same filename.
 
 ## Template Fields
 
@@ -74,13 +63,9 @@ Templates are loaded using the `templates` module:
 ```rust
 use crate::summary::templates;
 
-// Get a specific template
-let template = templates::get_template("daily_standup")?;
+// Get the standard template
+let template = templates::get_template("standard_meeting")?;
 
-// List available templates
-let available = templates::list_templates();
-
-// Validate custom template JSON
-let custom_json = std::fs::read_to_string("custom.json")?;
-let validated = templates::validate_template(&custom_json)?;
+// List available template ids
+let available = templates::list_template_ids();
 ```

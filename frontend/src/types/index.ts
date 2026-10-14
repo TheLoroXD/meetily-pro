@@ -66,8 +66,6 @@ export interface SummaryResponse {
 }
 
 // BlockNote-specific types
-export type SummaryFormat = 'legacy' | 'markdown' | 'blocknote';
-
 export interface BlockNoteBlock {
   id: string;
   type: string;

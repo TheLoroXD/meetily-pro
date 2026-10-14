@@ -53,10 +53,10 @@ jobs:
             echo
             echo "## Install"
             echo
-            echo "macOS: open the .dmg, drag Meetily to Applications, then run once:"
+            echo "macOS: open the .dmg, drag Meetily Pro to Applications, then run once:"
             echo
             echo '```sh'
-            echo "xattr -dr com.apple.quarantine /Applications/meetily.app"
+            echo "xattr -dr com.apple.quarantine \"/Applications/Meetily Pro.app\""
             echo '```'
             echo
             echo "The app is ad-hoc signed, not notarized; this clears the download quarantine so macOS lets it open."
@@ -67,7 +67,7 @@ jobs:
             echo
             echo "## Quickstart"
             echo
-            echo "1. Launch Meetily and download the Whisper \`base\` model when asked."
+            echo "1. Launch Meetily Pro and download the Whisper \`base\` model when asked."
             echo "2. Press record; the transcript appears live."
             echo "3. The assistant next to the transcript suggests what to ask and answers your questions."
             echo
@@ -81,7 +81,7 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --draft --notes-file notes.md
           else
-            gh release create "$TAG" --draft --verify-tag --title "Meetily $TAG" --notes-file notes.md
+            gh release create "$TAG" --draft --verify-tag --title "Meetily Pro $TAG" --notes-file notes.md
           fi
 
   build:

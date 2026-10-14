@@ -105,31 +105,33 @@
     --chart-5: 27 87% 67%;
   }
 
-  .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: 216 28% 7.1%;
+      --foreground: 208 35% 92.7%;
+      --card: 215 21% 11%;
+      --card-foreground: 208 35% 92.7%;
+      --popover: 215 21% 11%;
+      --popover-foreground: 208 35% 92.7%;
+      --primary: 208 35% 92.7%;
+      --primary-foreground: 216 28% 7.1%;
+      --secondary: 215 15% 15.3%;
+      --secondary-foreground: 208 35% 92.7%;
+      --muted: 215 15% 15.3%;
+      --muted-foreground: 212 9% 58.2%;
+      --accent: 218 17% 18%;
+      --accent-foreground: 208 35% 92.7%;
+      --destructive: 0 62.8% 45%;
+      --destructive-foreground: 0 0% 98%;
+      --border: 212 12% 21.4%;
+      --input: 212 12% 21.4%;
+      --ring: 212 9% 58.2%;
+      --chart-1: 220 70% 50%;
+      --chart-2: 160 60% 45%;
+      --chart-3: 30 80% 55%;
+      --chart-4: 280 65% 60%;
+      --chart-5: 340 75% 55%;
+    }
   }
 }
 
@@ -166,49 +168,17 @@
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #d1d5db;
+    background: rgb(var(--c-border-gray-300));
     border-radius: 3px;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #9ca3af;
+    background: rgb(var(--c-border-gray-400));
   }
 
   /* Firefox scrollbar */
   .custom-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: #d1d5db transparent;
-  }
-
-  /* BlockNote Editor - Override fixed dimensions for responsive layout */
-  .bn-container {
-    width: 100% !important;
-    max-width: none !important;
-    overflow: visible !important;
-  }
-
-  .bn-editor {
-    width: 100% !important;
-    max-width: none !important;
-    overflow: visible !important;
-  }
-
-  /* Disable internal scrolling - let parent handle all scrolling */
-  .ProseMirror {
-    overflow: visible !important;
-  }
-
-  /* Ensure BlockNote content area is responsive */
-  .bn-block-outer {
-    max-width: 100% !important;
-  }
-
-  .bn-default-styles {
-    max-width: none !important;
-  }
-
-  /* Disable scrolling on any BlockNote wrapper elements */
-  [data-node-type] {
-    overflow: visible !important;
+    scrollbar-color: rgb(var(--c-border-gray-300)) transparent;
   }
 }

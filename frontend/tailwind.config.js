@@ -1,6 +1,9 @@
+const plugin = require('tailwindcss/plugin');
+const { themeColors, colorVariables } = require('./tailwind.colors');
+
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-    darkMode: ['class'],
+    darkMode: 'media',
     content: [
     './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
     './src/components/**/*.{js,ts,jsx,tsx,mdx}',
@@ -8,6 +11,7 @@ module.exports = {
   ],
   theme: {
   	extend: {
+  		...themeColors,
   		fontFamily: {
   			sans: [
   				'var(--font-source-sans-3)'
@@ -89,5 +93,6 @@ module.exports = {
     require("tailwindcss-animate"),
     require("@tailwindcss/typography"),
     require("@tailwindcss/container-queries"),
+    plugin(({ addBase }) => addBase(colorVariables)),
   ],
 }

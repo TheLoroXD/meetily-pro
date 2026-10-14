@@ -24,7 +24,7 @@ export function WelcomeStep() {
 
   return (
     <OnboardingContainer
-      title="Welcome to Meetily"
+      title="Welcome to Meetily Pro"
       description="Record. Transcribe. Summarize. All on your device."
       step={1}
       hideProgress={true}
@@ -54,7 +54,7 @@ export function WelcomeStep() {
         <div className="w-full max-w-xs space-y-3">
           <Button
             onClick={goNext}
-            className="w-full h-11 bg-gray-900 hover:bg-gray-800 text-white"
+            className="w-full h-11"
           >
             Get Started
           </Button>

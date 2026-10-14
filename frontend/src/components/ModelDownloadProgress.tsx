@@ -74,21 +74,20 @@ export function ProgressRing({ progress, size = 40, strokeWidth = 3 }: ProgressR
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke="#e5e7eb"
           strokeWidth={strokeWidth}
           fill="transparent"
+          className="stroke-gray-200"
         />
         <circle
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke="#3b82f6"
           strokeWidth={strokeWidth}
           strokeDasharray={strokeDasharray}
           strokeDashoffset={strokeDashoffset}
           strokeLinecap="round"
           fill="transparent"
-          className="transition-all duration-300 ease-in-out"
+          className="stroke-blue-500 transition-all duration-300 ease-in-out"
         />
       </svg>
       <span className="absolute text-xs font-medium text-blue-600">

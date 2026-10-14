@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import Image from 'next/image';
-import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch";
 import { UpdateDialog } from "./UpdateDialog";
 import { updateService, UpdateInfo } from '@/services/updateService';
 import { Button } from './ui/button';
@@ -11,7 +10,7 @@ import { toast } from 'sonner';
 
 
 export function About() {
-    const [currentVersion, setCurrentVersion] = useState<string>('0.4.1');
+    const [currentVersion, setCurrentVersion] = useState<string>('');
     const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
     const [isChecking, setIsChecking] = useState(false);
     const [showUpdateDialog, setShowUpdateDialog] = useState(false);
@@ -45,7 +44,7 @@ export function About() {
                 description: 'Download the latest version from the Releases page.',
                 action: {
                     label: 'Open Releases',
-                    onClick: () => invoke('open_external_url', { url: 'https://github.com/asidko/meetily/releases/latest' }),
+                    onClick: () => invoke('open_external_url', { url: 'https://github.com/asidko/meetily-pro/releases/latest' }),
                 },
             });
         } finally {
@@ -60,7 +59,7 @@ export function About() {
                 <div className="mb-3">
                     <Image
                         src="icon_128x128.png"
-                        alt="Meetily Logo"
+                        alt="Meetily Pro Logo"
                         width={64}
                         height={64}
                         className="mx-auto"
@@ -101,7 +100,7 @@ export function About() {
 
             {/* Features Grid - Compact */}
             <div className="space-y-3">
-                <h2 className="text-base font-semibold text-gray-800">What makes Meetily different</h2>
+                <h2 className="text-base font-semibold text-gray-800">What makes Meetily Pro different</h2>
                 <div className="grid grid-cols-2 gap-2">
                     <div className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition-colors">
                         <h3 className="font-bold text-sm text-gray-900 mb-1">Privacy-first</h3>
@@ -149,7 +148,6 @@ export function About() {
                     Built by Zackriya Solutions
                 </p>
             </div>
-            <AnalyticsConsentSwitch />
 
             {/* Update Dialog */}
             <UpdateDialog

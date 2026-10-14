@@ -502,13 +502,13 @@ pub async fn api_get_model_config<R: Runtime>(
 }
 
 #[tauri::command]
-pub async fn api_save_summary_model<R: Runtime>(
+pub async fn api_save_ai_model<R: Runtime>(
     _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     provider: String,
     model: String,
 ) -> Result<(), String> {
-    log_info!("api_save_summary_model called: provider='{}', model='{}'", &provider, &model);
+    log_info!("api_save_ai_model called: provider='{}', model='{}'", &provider, &model);
     crate::summary::llm_client::LLMProvider::from_str(&provider)?;
     if model.trim().is_empty() {
         return Err("Model name is required".to_string());
@@ -519,10 +519,10 @@ pub async fn api_save_summary_model<R: Runtime>(
         .await
         .map_err(|e| e.to_string())?;
 
-    SettingsRepository::save_summary_model(pool, &provider, model.trim())
+    SettingsRepository::save_ai_model(pool, &provider, model.trim())
         .await
         .map_err(|e| {
-            log_error!("Failed to save summary model: {}", e);
+            log_error!("Failed to save AI model: {}", e);
             e.to_string()
         })?;
 

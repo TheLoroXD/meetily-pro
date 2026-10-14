@@ -1,13 +1,13 @@
-<p align="center"><img src="docs/Meetily-6.png" width="320" alt="Meetily" /></p>
+<p align="center"><img src="frontend/src-tauri/icons/icon.png" width="200" alt="Meetily Pro" /></p>
 
-# Meetily 🎙️ - Private AI meeting notes: record, transcribe, summarize on your machine
+# Meetily Pro 🎙️ - Private AI meeting notes: record, transcribe, summarize on your machine
 
 <p align="center">
   <a href="https://tauri.app"><img src="https://img.shields.io/badge/Tauri_2-24C8D8?style=for-the-badge&logo=tauri&logoColor=white" alt="Tauri 2"></a>
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust"></a>
   <a href="https://github.com/ggerganov/whisper.cpp"><img src="https://img.shields.io/badge/whisper.cpp-4B5563?style=for-the-badge" alt="whisper.cpp"></a>
-  <a href="frontend/package.json"><img src="https://img.shields.io/github/package-json/v/asidko/meetily?filename=frontend%2Fpackage.json&style=for-the-badge&label=version&color=F59E0B" alt="Version"></a>
-  <a href="https://github.com/asidko/meetily/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/asidko/meetily/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
+  <a href="frontend/package.json"><img src="https://img.shields.io/github/package-json/v/asidko/meetily-pro?filename=frontend%2Fpackage.json&style=for-the-badge&label=version&color=F59E0B" alt="Version"></a>
+  <a href="https://github.com/asidko/meetily-pro/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/asidko/meetily-pro/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/License-MIT-3B82F6?style=for-the-badge" alt="MIT License"></a>
 </p>
 
@@ -19,10 +19,10 @@ Fork of [Zackriya-Solutions/meetily](https://github.com/Zackriya-Solutions/meeti
 
 ## Install
 
-- **Download (recommended)**: [macOS Apple Silicon .dmg](https://github.com/asidko/meetily/releases/latest/download/meetily-macos-arm64.dmg) or [Linux x86_64 .deb](https://github.com/asidko/meetily/releases/latest/download/meetily-linux-x86_64.deb), checksums in [Releases](https://github.com/asidko/meetily/releases/latest).
+- **Download (recommended)**: [macOS Apple Silicon .dmg](https://github.com/asidko/meetily-pro/releases/latest/download/meetily-macos-arm64.dmg) or [Linux x86_64 .deb](https://github.com/asidko/meetily-pro/releases/latest/download/meetily-linux-x86_64.deb), checksums in [Releases](https://github.com/asidko/meetily-pro/releases/latest).
 - **Build from source**: Windows, Intel Mac, CUDA. See below.
 
-The macOS app is ad-hoc signed, not notarized. After dragging it to Applications, run `xattr -dr com.apple.quarantine /Applications/meetily.app` once. It needs microphone and screen-recording permission (that is how system audio is captured).
+The macOS app is ad-hoc signed, not notarized. After dragging it to Applications, run `xattr -dr com.apple.quarantine "/Applications/Meetily Pro.app"` once. It needs microphone and screen-recording permission (that is how system audio is captured).
 
 ## Quickstart
 
@@ -31,6 +31,14 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 3. Choose mic and system-audio device, press Record. Stop when done, open the meeting, generate the summary.
 
 ## What's new
+
+### v1.3.0
+
+- Meetily is now Meetily Pro, with a new icon.
+- When a call ends, its summary appears above the assistant chat, and you can keep asking about the meeting, even days later.
+- One AI model writes summaries and answers your questions.
+- Follows your system light or dark mode.
+- Simpler settings: General, Recordings and Models. Usage analytics are gone.
 
 ### v1.2.0
 
@@ -45,12 +53,6 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 - Works smoothly with models on your own computer, even when people talk without pauses.
 - Simpler assistant settings that tell you what is missing. Online models can be allowed right from the assistant panel.
 
-### v1.0.0
-
-- A new assistant next to the live transcript suggests questions to ask and things to clarify, each linked to where it was said.
-- Pin the useful suggestions to include them in the meeting summary.
-- Ready-to-install downloads for Mac and Linux.
-
 ## Roadmap
 
 - **Claude Code as provider**: your own Claude Code login, tools disabled, no session files.
@@ -63,7 +65,7 @@ Live transcription on device (Whisper with Metal/CUDA/Vulkan/ROCm, or Parakeet o
 
 Live assistant beside the transcript: questions and tips cited to transcript moments, plus a chat about the call so far. Design: [docs/LIVE_ASSISTANT_DESIGN.md](docs/LIVE_ASSISTANT_DESIGN.md).
 
-Summaries from templates (standard, standup, retro, client call), editable in place.
+When a call ends, its summary appears above the assistant chat, and the chat stays open for follow-up questions about the meeting.
 
 <p align="center"><img src="docs/summary.png" width="720" alt="Summary" /></p>
 
@@ -79,21 +81,21 @@ Mic and system audio mixed with ducking and clip protection; everything stored a
 
 - Otter, Fireflies, Granola: better diarization and integrations, cloud processing and storage.
 - MacWhisper, raw whisper.cpp: great local transcription, no system-audio capture, mixing or summaries.
-- Meetily: the whole pipeline, local by default, model is your choice. No bot, no diarization yet.
+- Meetily Pro: the whole pipeline, local by default, model is your choice. No bot, no diarization yet.
 
 ## Configuration
 
 All settings are in the app. Data lives in the Tauri app data dir (`~/Library/Application Support/com.meetily.ai`, `%APPDATA%\com.meetily.ai`, `~/.local/share/com.meetily.ai`): `meeting_minutes.sqlite`, `models/`, and a recordings folder with one directory per meeting.
 
-Custom summary templates: JSON files in `Meetily/templates/` under the user data dir (same name as a bundled template overrides it). Schema: [templates/README.md](frontend/src-tauri/templates/README.md).
+Custom summary template: a `standard_meeting.json` in `Meetily/templates/` under the user data dir overrides the bundled one. Schema: [templates/README.md](frontend/src-tauri/templates/README.md).
 
 ## Build from source
 
 Rust stable, Node 20, pnpm 9.15.9, CMake. Linux adds clang and libasound2-dev; Windows adds VS Build Tools C++ workload.
 
 ```bash
-git clone https://github.com/asidko/meetily
-cd meetily/frontend
+git clone https://github.com/asidko/meetily-pro
+cd meetily-pro/frontend
 pnpm install --frozen-lockfile
 ./dev-gpu.sh      # dev run, auto-detects GPU, builds the llama sidecar
 ./build-gpu.sh    # release bundle in ../target/release/bundle/

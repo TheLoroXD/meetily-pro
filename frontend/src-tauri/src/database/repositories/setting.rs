@@ -26,7 +26,7 @@ impl SettingsRepository {
         Ok(setting)
     }
 
-    pub async fn save_summary_model(
+    pub async fn save_ai_model(
         pool: &SqlitePool,
         provider: &str,
         model: &str,
@@ -387,9 +387,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn saving_the_summary_model_on_empty_db_creates_the_row() {
+    async fn saving_the_ai_model_on_empty_db_creates_the_row() {
         let pool = pool().await;
-        SettingsRepository::save_summary_model(&pool, "builtin-ai", "gemma3:1b").await.unwrap();
+        SettingsRepository::save_ai_model(&pool, "builtin-ai", "gemma3:1b").await.unwrap();
         let s = SettingsRepository::get_model_config(&pool).await.unwrap().unwrap();
         assert_eq!((s.provider.as_str(), s.model.as_str(), s.ollama_endpoint), ("builtin-ai", "gemma3:1b", None));
     }
@@ -397,7 +397,7 @@ mod tests {
     #[tokio::test]
     async fn saving_a_key_keeps_the_summary_model() {
         let pool = pool().await;
-        SettingsRepository::save_summary_model(&pool, "ollama", "gemma3:1b").await.unwrap();
+        SettingsRepository::save_ai_model(&pool, "ollama", "gemma3:1b").await.unwrap();
         SettingsRepository::save_api_key(&pool, "claude", "sk-ant").await.unwrap();
         let s = SettingsRepository::get_model_config(&pool).await.unwrap().unwrap();
         assert_eq!((s.provider.as_str(), s.model.as_str()), ("ollama", "gemma3:1b"));
@@ -408,7 +408,7 @@ mod tests {
         let pool = pool().await;
         SettingsRepository::save_ollama_endpoint(&pool, Some("http://gpu:11434")).await.unwrap();
         SettingsRepository::save_api_key(&pool, "groq", "gsk").await.unwrap();
-        SettingsRepository::save_summary_model(&pool, "claude", "claude-sonnet-4-5").await.unwrap();
+        SettingsRepository::save_ai_model(&pool, "claude", "claude-sonnet-4-5").await.unwrap();
         let s = SettingsRepository::get_model_config(&pool).await.unwrap().unwrap();
         assert_eq!(s.ollama_endpoint.as_deref(), Some("http://gpu:11434"));
         assert_eq!(
@@ -420,7 +420,7 @@ mod tests {
     #[tokio::test]
     async fn saving_the_endpoint_keeps_the_summary_model() {
         let pool = pool().await;
-        SettingsRepository::save_summary_model(&pool, "openai", "gpt-4o").await.unwrap();
+        SettingsRepository::save_ai_model(&pool, "openai", "gpt-4o").await.unwrap();
         SettingsRepository::save_ollama_endpoint(&pool, None).await.unwrap();
         let s = SettingsRepository::get_model_config(&pool).await.unwrap().unwrap();
         assert_eq!((s.provider.as_str(), s.model.as_str()), ("openai", "gpt-4o"));
@@ -430,12 +430,12 @@ mod tests {
     #[tokio::test]
     async fn custom_server_model_follows_config_only_when_selected() {
         let pool = pool().await;
-        SettingsRepository::save_summary_model(&pool, "openai", "gpt-4o").await.unwrap();
+        SettingsRepository::save_ai_model(&pool, "openai", "gpt-4o").await.unwrap();
         SettingsRepository::save_custom_openai_config(&pool, &custom("llama3")).await.unwrap();
         let s = SettingsRepository::get_model_config(&pool).await.unwrap().unwrap();
         assert_eq!((s.provider.as_str(), s.model.as_str()), ("openai", "gpt-4o"));
 
-        SettingsRepository::save_summary_model(&pool, "custom-openai", "llama3").await.unwrap();
+        SettingsRepository::save_ai_model(&pool, "custom-openai", "llama3").await.unwrap();
         SettingsRepository::save_custom_openai_config(&pool, &custom("qwen3")).await.unwrap();
         let s = SettingsRepository::get_model_config(&pool).await.unwrap().unwrap();
         assert_eq!((s.provider.as_str(), s.model.as_str()), ("custom-openai", "qwen3"));
