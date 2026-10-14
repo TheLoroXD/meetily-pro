@@ -67,7 +67,11 @@ pub async fn ask<R: Runtime>(app: &AppHandle<R>, meeting_id: &str, question: Str
 
 async fn budget(plan: &RequestPlan) -> usize {
     match plan.provider_settings.provider {
-        LLMProvider::OpenAI | LLMProvider::Claude | LLMProvider::OpenRouter => LARGE_CONTEXT_INPUT_TOKENS,
+        LLMProvider::OpenAI
+        | LLMProvider::Claude
+        | LLMProvider::OpenRouter
+        | LLMProvider::ClaudeCode
+        | LLMProvider::Codex => LARGE_CONTEXT_INPUT_TOKENS,
         LLMProvider::Ollama => service::input_budget(&plan.provider_settings, &plan.model)
             .await
             .saturating_sub(ANSWER_TOKENS as usize)

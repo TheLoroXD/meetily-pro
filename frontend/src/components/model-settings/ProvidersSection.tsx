@@ -6,10 +6,11 @@ import { useConfig } from '@/contexts/ConfigContext';
 import { ModelManager as WhisperModelManager } from '@/components/WhisperModelManager';
 import { ParakeetModelManager } from '@/components/ParakeetModelManager';
 import { BuiltInModelManager } from '@/components/BuiltInModelManager';
-import { CLOUD_PROVIDERS, catalogLabel, isOnDevice, type Catalog, type CatalogProvider, type CloudProvider, type ProviderState } from '@/lib/model-catalog';
+import { CLI_AGENTS, CLOUD_PROVIDERS, catalogLabel, isCliAgent, isOnDevice, type Catalog, type CatalogProvider, type CloudProvider, type ProviderState } from '@/lib/model-catalog';
 import { CloudKeyCard } from './CloudKeyCard';
 import { OllamaCard } from './OllamaCard';
 import { CustomServerCard } from './CustomServerCard';
+import { CliAgentCard } from './CliAgentCard';
 
 type Badge = { text: string; className: string };
 
@@ -27,10 +28,12 @@ function count(models: string[], noun: string): string {
 function describe(provider: CatalogProvider, state: ProviderState | undefined, hasKey: boolean): { line: string; badge: Badge } {
   if (!state || state.status === 'loading') return { line: '', badge: BADGES.checking };
   const onDevice = isOnDevice(provider);
+  const cli = isCliAgent(provider);
   if (state.status === 'ready') {
     if (onDevice) return { line: `${count(state.models, 'model')} downloaded`, badge: BADGES.ready };
     if (provider === 'ollama') return { line: `Connected - ${count(state.models, 'model')}`, badge: BADGES.ready };
     if (provider === 'custom-openai') return { line: state.models[0], badge: BADGES.ready };
+    if (cli) return { line: state.detail ? `Signed in - ${state.detail}` : 'Signed in', badge: BADGES.ready };
     return { line: 'Key saved', badge: BADGES.ready };
   }
   if (state.status === 'error') {
@@ -39,12 +42,13 @@ function describe(provider: CatalogProvider, state: ProviderState | undefined, h
   if (onDevice) return { line: 'No models downloaded', badge: BADGES.missing };
   if (provider === 'ollama') return { line: 'Connected - no models yet', badge: BADGES.missing };
   if (provider === 'custom-openai') return { line: 'No server yet', badge: BADGES.missing };
+  if (cli) return { line: state.reason, badge: BADGES.missing };
   return { line: 'No key', badge: BADGES.missing };
 }
 
 interface ProvidersSectionProps {
   catalog: Catalog;
-  refresh: (only?: CatalogProvider[]) => void;
+  refresh: (only?: CatalogProvider[]) => Promise<void>;
   open: string;
   onOpenChange: (value: string) => void;
   inUseBy: (provider: string) => string[];
@@ -90,6 +94,7 @@ export function ProvidersSection({ catalog, refresh, open, onOpenChange, inUseBy
           {row('ollama', null, <OllamaCard state={catalog.ollama} onChanged={() => refresh(['ollama'])} />)}
           {CLOUD_PROVIDERS.map((provider) => row(provider, null, <CloudKeyCard provider={provider} inUseBy={inUseBy(provider)} />))}
           {row('custom-openai', null, <CustomServerCard onSaved={onCustomServerSaved} />)}
+          {CLI_AGENTS.map((provider) => row(provider, null, <CliAgentCard provider={provider} state={catalog[provider]} onRecheck={() => refresh([provider])} />))}
         </Accordion>
       </div>
     </div>

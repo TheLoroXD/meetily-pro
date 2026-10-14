@@ -27,10 +27,16 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 ## Quickstart
 
 1. First launch downloads a transcription model. Whisper `base` is fine to start.
-2. Pick a summary engine: built-in local model, Ollama, or a cloud key (OpenAI, Claude, Groq, OpenRouter, custom OpenAI-compatible).
-3. Choose mic and system-audio device, press Record. Stop when done, open the meeting, generate the summary.
+2. Pick an AI model: built-in local model, Ollama, a cloud key (OpenAI, Claude, Groq, OpenRouter, custom OpenAI-compatible), or your own Claude Code or Codex sign-in.
+3. Choose mic and system-audio device, press Record. Stop when done; the summary appears in the meeting.
 
 ## What's new
+
+### v1.4.0
+
+- Use your Claude Code or Codex sign-in as the AI model, no API key needed.
+- The live assistant now brings useful facts and tips, not only questions.
+- Change the transcription language during a call (Whisper).
 
 ### v1.3.0
 
@@ -45,17 +51,6 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 - One Models page in Settings: add your AI services and download models in one place.
 - Pick the voice, summary and assistant models separately, from the ones that work right now.
 - Your saved keys, server addresses and downloaded models carry over.
-
-### v1.1.0
-
-- The assistant is on from the start, and a bar shows when its next tip is coming. Press refresh to get one right away.
-- Ask the assistant anything during the call. Answers point to the moment it was said, and tapping a suggestion asks about it.
-- Works smoothly with models on your own computer, even when people talk without pauses.
-- Simpler assistant settings that tell you what is missing. Online models can be allowed right from the assistant panel.
-
-## Roadmap
-
-- **Claude Code as provider**: your own Claude Code login, tools disabled, no session files.
 
 ## Features
 

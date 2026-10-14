@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Globe } from 'lucide-react';
 import { toast } from 'sonner';
-import { useConfig } from '@/contexts/ConfigContext';
 
 export interface Language {
   code: string;
@@ -116,48 +115,26 @@ const LANGUAGES: Language[] = [
 interface LanguageSelectionProps {
   selectedLanguage: string;
   onLanguageChange: (language: string) => void;
-  disabled?: boolean;
   provider?: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
 }
 
 export function LanguageSelection({
   selectedLanguage,
   onLanguageChange,
-  disabled = false,
   provider = 'localWhisper'
 }: LanguageSelectionProps) {
-  const [saving, setSaving] = useState(false);
-  const { setSelectedLanguage } = useConfig();
-
   // Parakeet only supports auto-detection (doesn't support manual language selection)
   const isParakeet = provider === 'parakeet';
   const availableLanguages = isParakeet
     ? LANGUAGES.filter(lang => lang.code === 'auto' || lang.code === 'auto-translate')
     : LANGUAGES;
 
-  const handleLanguageChange = async (languageCode: string) => {
-    setSaving(true);
-    try {
-      // Save language preference to localStorage and sync to backend
-      setSelectedLanguage(languageCode);
-      onLanguageChange(languageCode);
-      console.log('Language preference saved:', languageCode);
-
-      const selectedLang = LANGUAGES.find(lang => lang.code === languageCode);
-
-      // Show success toast
-      const languageName = selectedLang?.name || languageCode;
-      toast.success("Language preference saved", {
-        description: `Transcription language set to ${languageName}`
-      });
-    } catch (error) {
-      console.error('Failed to save language preference:', error);
-      toast.error("Failed to save language preference", {
-        description: error instanceof Error ? error.message : String(error)
-      });
-    } finally {
-      setSaving(false);
-    }
+  const handleLanguageChange = (languageCode: string) => {
+    onLanguageChange(languageCode);
+    const languageName = LANGUAGES.find(lang => lang.code === languageCode)?.name || languageCode;
+    toast.success("Language preference saved", {
+      description: `Transcription language set to ${languageName}`
+    });
   };
 
   // Find the selected language name for display
@@ -178,7 +155,6 @@ export function LanguageSelection({
         <select
           value={selectedLanguage}
           onChange={(e) => handleLanguageChange(e.target.value)}
-          disabled={disabled || saving}
           className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
         >
           {availableLanguages.map((language) => (

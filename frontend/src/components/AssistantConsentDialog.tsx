@@ -20,7 +20,7 @@ export function AssistantConsentDialog({ provider, onConfirm, onCancel }: Assist
           <DialogDescription asChild>
             <div className="space-y-2 text-sm text-gray-600">
               <p>While you record, the assistant sends recent transcript text to {label} about once a minute. Other participants&apos; words are included. Tell them.</p>
-              <p>The text is kept under {label}&apos;s retention policy, outside this computer. Summaries already use this provider only when you ask for one; the live assistant sends automatically.</p>
+              <p>The text is kept under {label}&apos;s retention policy, outside this computer. Summaries and chat answers use it after the call too; the live assistant sends automatically while you record.</p>
             </div>
           </DialogDescription>
         </DialogHeader>

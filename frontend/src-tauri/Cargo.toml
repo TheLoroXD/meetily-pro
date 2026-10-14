@@ -1,6 +1,6 @@
 [package]
 name = "meetily"
-version = "1.3.0"
+version = "1.4.0"
 description = "A Tauri App for meeting minutes"
 authors = ["Sujith S"]
 license = "MIT"
@@ -198,6 +198,9 @@ futures-channel = "0.3.31"
 [target.'cfg(target_os = "linux")'.dependencies]
 whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-channel = "0.3.31"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3.3.0"

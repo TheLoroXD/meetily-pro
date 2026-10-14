@@ -6,9 +6,11 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(300);
+use super::cli_agent::{self, CliAgent};
 
-async fn await_or_cancel<T>(
+pub(crate) const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(300);
+
+pub(crate) async fn await_or_cancel<T>(
     operation: impl Future<Output = T>,
     cancellation_token: Option<&CancellationToken>,
 ) -> Result<T, String> {
@@ -49,6 +51,7 @@ pub struct ChatRequest {
 pub struct CompletionOptions {
     pub json_mode: bool,
     pub max_tokens: Option<u32>,
+    pub json_schema: Option<&'static str>,
 }
 
 fn supports_json_mode(provider: &LLMProvider) -> bool {
@@ -242,6 +245,8 @@ pub enum LLMProvider {
     OpenRouter,
     BuiltInAI,
     CustomOpenAI,
+    ClaudeCode,
+    Codex,
 }
 
 impl LLMProvider {
@@ -255,6 +260,8 @@ impl LLMProvider {
             "openrouter" => Ok(Self::OpenRouter),
             "builtin-ai" | "local-llama" | "localllama" => Ok(Self::BuiltInAI),
             "custom-openai" => Ok(Self::CustomOpenAI),
+            "claude-code" => Ok(Self::ClaudeCode),
+            "codex" => Ok(Self::Codex),
             _ => Err(format!("Unsupported LLM provider: {}", s)),
         }
     }
@@ -356,6 +363,15 @@ pub(crate) async fn complete(
         .map_err(|e| e.to_string());
     }
 
+    if let Some(agent) = CliAgent::of(provider) {
+        return cli_agent::complete(agent, model_name, system_prompt, user_prompt, options.json_schema, cancellation_token)
+            .await
+            .map(|content| LlmCompletion {
+                content,
+                reasoning_stripped: false,
+            });
+    }
+
     let (api_url, mut headers) = match provider {
         LLMProvider::OpenAI => (
             "https://api.openai.com/v1/chat/completions".to_string(),
@@ -402,9 +418,9 @@ pub(crate) async fn complete(
             );
             ("https://api.anthropic.com/v1/messages".to_string(), header_map)
         }
-        LLMProvider::BuiltInAI => {
+        LLMProvider::BuiltInAI | LLMProvider::ClaudeCode | LLMProvider::Codex => {
             // This case is handled earlier with early returns
-            unreachable!("BuiltInAI is handled before this match statement")
+            unreachable!("{} is handled before this match statement", provider_name(provider))
         }
     };
 
@@ -972,7 +988,7 @@ mod tests {
 }
 
 /// Helper function to get provider name for logging
-fn provider_name(provider: &LLMProvider) -> &str {
+pub(crate) fn provider_name(provider: &LLMProvider) -> &'static str {
     match provider {
         LLMProvider::OpenAI => "OpenAI",
         LLMProvider::Claude => "Claude",
@@ -981,6 +997,8 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::BuiltInAI => "Built-in AI",
         LLMProvider::OpenRouter => "OpenRouter",
         LLMProvider::CustomOpenAI => "Custom OpenAI",
+        LLMProvider::ClaudeCode => "Claude Code",
+        LLMProvider::Codex => "Codex",
     }
 }
 
