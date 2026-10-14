@@ -49,10 +49,10 @@ pub(crate) async fn resolve_provider_settings(
 ) -> Result<ProviderSettings, String> {
     let provider = LLMProvider::from_str(model_provider)?;
 
-    let api_key = if provider == LLMProvider::Ollama
-        || provider == LLMProvider::BuiltInAI
-        || provider == LLMProvider::CustomOpenAI
-    {
+    let api_key = if matches!(
+        provider,
+        LLMProvider::Ollama | LLMProvider::BuiltInAI | LLMProvider::CustomOpenAI | LLMProvider::ClaudeCode | LLMProvider::Codex
+    ) {
         String::new()
     } else {
         match SettingsRepository::get_api_key(pool, model_provider).await {

@@ -1,9 +1,11 @@
-export type TextProvider = 'builtin-ai' | 'ollama' | 'openai' | 'claude' | 'groq' | 'openrouter' | 'custom-openai';
+export type TextProvider = 'builtin-ai' | 'ollama' | 'openai' | 'claude' | 'groq' | 'openrouter' | 'custom-openai' | CliAgentProvider;
 export type SpeechProvider = 'parakeet' | 'localWhisper';
 export type CatalogProvider = TextProvider | SpeechProvider;
 
 export const SPEECH_PROVIDERS: SpeechProvider[] = ['parakeet', 'localWhisper'];
-export const TEXT_PROVIDERS: TextProvider[] = ['builtin-ai', 'ollama', 'openai', 'claude', 'groq', 'openrouter', 'custom-openai'];
+export const CLI_AGENTS = ['claude-code', 'codex'] as const;
+export type CliAgentProvider = typeof CLI_AGENTS[number];
+export const TEXT_PROVIDERS: TextProvider[] = ['builtin-ai', 'ollama', 'openai', 'claude', 'groq', 'openrouter', 'custom-openai', ...CLI_AGENTS];
 export const CLOUD_PROVIDERS = ['openai', 'claude', 'groq', 'openrouter'] as const;
 export type CloudProvider = typeof CLOUD_PROVIDERS[number];
 
@@ -17,6 +19,8 @@ const LABELS: Record<CatalogProvider, string> = {
   groq: 'Groq',
   openrouter: 'OpenRouter',
   'custom-openai': 'Custom server',
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
 };
 
 export function catalogLabel(provider: string): string {
@@ -25,7 +29,7 @@ export function catalogLabel(provider: string): string {
 
 export type ProviderState =
   | { status: 'loading' }
-  | { status: 'ready'; models: string[] }
+  | { status: 'ready'; models: string[]; detail?: string }
   | { status: 'not-set-up'; reason: string }
   | { status: 'error'; reason: string };
 
@@ -105,6 +109,24 @@ async function loadCustom(call: Call): Promise<ProviderState> {
   }
 }
 
+interface CliAgentStatus {
+  installed: boolean;
+  version: string | null;
+  signedIn: boolean;
+  models: string[];
+}
+
+async function loadCliAgent(call: Call, agent: CliAgentProvider): Promise<ProviderState> {
+  try {
+    const status = await call<CliAgentStatus>('cli_agent_status', { agent });
+    if (!status.installed) return { status: 'not-set-up', reason: 'Not installed.' };
+    if (!status.signedIn) return { status: 'not-set-up', reason: 'Installed, not signed in.' };
+    return { status: 'ready', models: status.models, detail: status.version ?? undefined };
+  } catch (error) {
+    return { status: 'error', reason: errorText(error) };
+  }
+}
+
 export async function loadProvider(call: Call, provider: CatalogProvider, inputs: CatalogInputs): Promise<ProviderState> {
   switch (provider) {
     case 'parakeet':
@@ -117,6 +139,9 @@ export async function loadProvider(call: Call, provider: CatalogProvider, inputs
       return loadOllama(call, inputs.ollamaEndpoint);
     case 'custom-openai':
       return loadCustom(call);
+    case 'claude-code':
+    case 'codex':
+      return loadCliAgent(call, provider);
     default:
       return loadCloud(call, provider, inputs.keys[provider]);
   }
@@ -144,6 +169,10 @@ const ON_DEVICE = new Set<string>(['parakeet', 'localWhisper', 'builtin-ai']);
 
 export function isOnDevice(provider: string): boolean {
   return ON_DEVICE.has(provider);
+}
+
+export function isCliAgent(provider: string): provider is CliAgentProvider {
+  return (CLI_AGENTS as readonly string[]).includes(provider);
 }
 
 export function availability(catalog: Catalog, choice: ModelChoice | null): Availability {

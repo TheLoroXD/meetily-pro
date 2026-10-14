@@ -736,6 +736,7 @@ pub fn run() {
             summary::commands::api_save_meeting_detected_summary_language,
             summary::commands::api_detect_transcript_summary_language,
             summary::commands::api_cancel_summary,
+            summary::cli_agent::cli_agent_status,
             // Built-in AI commands
             summary::summary_engine::commands::builtin_ai_list_models,
             summary::summary_engine::commands::builtin_ai_get_model_info,

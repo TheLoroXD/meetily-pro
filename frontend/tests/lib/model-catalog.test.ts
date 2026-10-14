@@ -39,6 +39,15 @@ describe('model catalog loading', () => {
       .toEqual({ status: 'ready', models: ['qwen3'] });
   });
 
+  test('coding agents are ready only when installed and signed in', async () => {
+    const status = (installed: boolean, signedIn: boolean) => fakeCall({
+      cli_agent_status: { installed, version: installed ? 'v2.1.0' : null, signedIn, models: signedIn ? ['sonnet', 'haiku'] : [] },
+    }).call;
+    expect(await loadProvider(status(false, false), 'claude-code', NO_INPUTS)).toEqual({ status: 'not-set-up', reason: 'Not installed.' });
+    expect(await loadProvider(status(true, false), 'codex', NO_INPUTS)).toEqual({ status: 'not-set-up', reason: 'Installed, not signed in.' });
+    expect(await loadProvider(status(true, true), 'claude-code', NO_INPUTS)).toEqual({ status: 'ready', models: ['sonnet', 'haiku'], detail: 'v2.1.0' });
+  });
+
   test('on-device providers only offer finished downloads', async () => {
     const { call } = fakeCall({
       parakeet_get_available_models: [{ name: 'a', status: 'Available' }, { name: 'b', status: { Downloading: { progress: 4 } } }],

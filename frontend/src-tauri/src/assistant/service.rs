@@ -665,7 +665,7 @@ async fn run_tick<R: Runtime>(
     let window = prompt::select_window(segments, window_budget);
     let user_prompt = prompt::build_user_prompt(prefix, window, on_demand);
     let through_seq = window.last().map(|s| s.sequence_id);
-    let options = CompletionOptions { json_mode: true, max_tokens: Some(OUTPUT_TOKENS) };
+    let options = CompletionOptions { json_mode: true, max_tokens: Some(OUTPUT_TOKENS), json_schema: Some(prompt::SUGGESTIONS_SCHEMA) };
     let content = call_model(app, plan, prompt::SYSTEM_PROMPT, &user_prompt, token, options).await?;
     Ok((prompt::parse_model_output(&content)?, through_seq))
 }
@@ -778,7 +778,7 @@ pub(super) async fn answer_question<R: Runtime>(
     let window = prompt::select_window(request.segments, window_budget);
     let user_prompt = prompt::build_chat_prompt(request.prefix, window, &history);
     info!("Assistant chat via {}/{}", plan.provider_label, plan.model);
-    let options = CompletionOptions { json_mode: false, max_tokens: Some(request.max_tokens) };
+    let options = CompletionOptions { json_mode: false, max_tokens: Some(request.max_tokens), json_schema: None };
     let content = call_model(app, plan, request.system_prompt, &user_prompt, token, options).await?;
     visible_chat_answer(&content, request.segments)
 }
