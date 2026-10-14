@@ -22,7 +22,7 @@ interface TranscriptPanelProps {
   isLoadingMore?: boolean;
   totalCount?: number;
   loadedCount?: number;
-  onLoadMore?: () => void;
+  onLoadMore?: (all?: boolean) => void;
 
   // Retranscription props
   meetingId?: string;

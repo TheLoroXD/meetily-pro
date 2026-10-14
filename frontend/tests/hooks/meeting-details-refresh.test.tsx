@@ -4,14 +4,12 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import type { SummaryProcessResponse } from '../../src/types';
 
 const originalCore = { ...await import('@tauri-apps/api/core') };
-const originalAnalytics = { ...await import('../../src/lib/analytics') };
 const originalPreferences = { ...await import('../../src/lib/summary-language-preferences') };
 const originalToast = { ...await import('sonner') };
 const originalNavigation = { ...await import('next/navigation') };
 const originalConfig = { ...await import('../../src/contexts/ConfigContext') };
 afterAll(() => {
   mock.module('@tauri-apps/api/core', () => originalCore);
-  mock.module('../../src/lib/analytics', () => originalAnalytics);
   mock.module('../../src/lib/summary-language-preferences', () => originalPreferences);
   mock.module('sonner', () => originalToast);
   mock.module('next/navigation', () => originalNavigation);
@@ -24,17 +22,12 @@ mock.module('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams({ id: selectedMeeting }),
 }));
 mock.module('../../src/contexts/RecordingStateContext', () => ({ useRecordingState: () => ({ isRecording: false }) }));
-mock.module('../../src/contexts/ConfigContext', () => ({ useConfig: () => ({ isAutoSummary: false }) }));
+mock.module('../../src/contexts/ConfigContext', () => ({ useConfig: () => ({}) }));
 const notify = mock(() => {});
 mock.module('sonner', () => ({ toast: { info: notify, error: notify, success: notify, warning: notify } }));
-mock.module('../../src/lib/analytics', () => ({ default: {
-  trackPageView() {}, trackBackendConnection() {}, trackSummaryGenerationStarted: async () => {},
-  trackSummaryGenerationCompleted: async () => {},
-} }));
 mock.module('../../src/lib/summary-language-preferences', () => ({
   readCachedDetectedSummaryLanguage: async () => null,
   detectAndCacheSummaryLanguage: async () => ({ language: 'en' }),
-  readMeetingSummaryLanguage: async () => ({ language: 'en', storage: 'metadata' }),
 }));
 const metadata = (id: string) => ({ id, title: id, created_at: '2026-09-01', updated_at: '2026-09-01' });
 let readMetadata: (id: string) => Promise<unknown>;
@@ -66,7 +59,7 @@ function SummaryView(props: any) {
   summaryState = useSummaryGeneration({
     meeting: props.meeting, initialSummary: props.initialSummary, transcripts: data.transcripts,
     modelConfig: { provider: 'ollama', model: 'test' }, isModelConfigLoading: false,
-    selectedTemplate: 'daily_standup', setAiSummary: data.setAiSummary, updateMeetingTitle: data.updateMeetingTitle,
+    setAiSummary: data.setAiSummary, updateMeetingTitle: data.updateMeetingTitle,
   });
   refresh = props.onRefetchTranscripts;
   useEffect(() => { mounts += 1; }, []);

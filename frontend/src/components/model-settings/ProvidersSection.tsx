@@ -48,7 +48,7 @@ interface ProvidersSectionProps {
   open: string;
   onOpenChange: (value: string) => void;
   inUseBy: (provider: string) => string[];
-  onCustomServerSaved: (model: string) => void;
+  onCustomServerSaved: () => void;
 }
 
 export function ProvidersSection({ catalog, refresh, open, onOpenChange, inUseBy, onCustomServerSaved }: ProvidersSectionProps) {
@@ -67,7 +67,7 @@ export function ProvidersSection({ catalog, refresh, open, onOpenChange, inUseBy
             <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${badge.className}`}>{badge.text}</span>
           </span>
         </AccordionTrigger>
-        <AccordionContent className="pb-4">{body}</AccordionContent>
+        <AccordionContent className="px-1 pt-1 pb-4">{body}</AccordionContent>
       </AccordionItem>
     );
   };

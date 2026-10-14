@@ -1,14 +1,12 @@
 'use client';
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { ArrowLeft, Settings2, Mic, Boxes, SparkleIcon, FlaskConical } from 'lucide-react';
+import { ArrowLeft, Settings2, Mic, Boxes } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { ModelsSettings } from '@/components/model-settings/ModelsSettings';
-import { SummarySettings } from '@/components/SummarySettings';
-import { BetaSettings } from '@/components/BetaSettings';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 // Tabs configuration (constant)
@@ -16,8 +14,6 @@ const TABS = [
   { value: 'general', label: 'General', icon: Settings2 },
   { value: 'recording', label: 'Recordings', icon: Mic },
   { value: 'models', label: 'Models', icon: Boxes },
-  { value: 'summary', label: 'Summary', icon: SparkleIcon },
-  { value: 'beta', label: 'Beta', icon: FlaskConical }
 ] as const;
 
 export default function SettingsPage() {
@@ -99,12 +95,6 @@ export default function SettingsPage() {
             </TabsContent>
             <TabsContent value="models" className="mt-6">
               <ModelsSettings />
-            </TabsContent>
-            <TabsContent value="summary">
-              <SummarySettings />
-            </TabsContent>
-            <TabsContent value="beta" className="mt-6">
-              <BetaSettings />
             </TabsContent>
           </Tabs>
         </div>

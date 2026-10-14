@@ -1,0 +1,131 @@
+use sqlx::{Row, Sqlite, SqlitePool, Transaction};
+
+use crate::assistant::prompt::{ChatMessage, ChatRole};
+
+pub struct MeetingChatRepository;
+
+async fn insert_after_last(
+    transaction: &mut Transaction<'_, Sqlite>,
+    meeting_id: &str,
+    messages: &[ChatMessage],
+) -> Result<(), sqlx::Error> {
+    let created_at = chrono::Utc::now().to_rfc3339();
+    for message in messages {
+        sqlx::query(
+            "INSERT INTO meeting_chat_messages (meeting_id, position, role, text, error, created_at) SELECT ?, COALESCE(MAX(position), 0) + 1, ?, ?, ?, ? FROM meeting_chat_messages WHERE meeting_id = ?",
+        )
+        .bind(meeting_id)
+        .bind(message.role.as_str())
+        .bind(&message.text)
+        .bind(message.error as i64)
+        .bind(&created_at)
+        .bind(meeting_id)
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(())
+}
+
+impl MeetingChatRepository {
+    pub async fn replace_for_meeting(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        messages: &[ChatMessage],
+    ) -> Result<(), sqlx::Error> {
+        let mut transaction = pool.begin().await?;
+        sqlx::query("DELETE FROM meeting_chat_messages WHERE meeting_id = ?")
+            .bind(meeting_id)
+            .execute(&mut *transaction)
+            .await?;
+        insert_after_last(&mut transaction, meeting_id, messages).await?;
+        transaction.commit().await
+    }
+
+    pub async fn append(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        messages: &[ChatMessage],
+    ) -> Result<(), sqlx::Error> {
+        let mut transaction = pool.begin().await?;
+        insert_after_last(&mut transaction, meeting_id, messages).await?;
+        transaction.commit().await
+    }
+
+    pub async fn get_for_meeting(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<Vec<ChatMessage>, sqlx::Error> {
+        let rows = sqlx::query(
+            "SELECT position, role, text, error FROM meeting_chat_messages WHERE meeting_id = ? ORDER BY position",
+        )
+        .bind(meeting_id)
+        .fetch_all(pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| ChatMessage {
+                id: format!("c{}", row.get::<i64, _>("position")),
+                role: ChatRole::parse(row.get::<String, _>("role").as_str()),
+                text: row.get("text"),
+                error: row.get::<i64, _>("error") != 0,
+            })
+            .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO meetings (id, title, created_at, updated_at) VALUES ('m1', 'Sync', '2026-10-14T10:00:00Z', '2026-10-14T10:00:00Z')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool
+    }
+
+    fn message(role: ChatRole, text: &str, error: bool) -> ChatMessage {
+        ChatMessage { id: String::new(), role, text: text.to_string(), error }
+    }
+
+    #[tokio::test]
+    async fn call_chat_is_kept_and_follow_ups_continue_after_it() {
+        let pool = pool().await;
+        let call = [message(ChatRole::User, "Who owns it?", false), message(ChatRole::Assistant, "Nobody yet [01:10]", false)];
+        MeetingChatRepository::replace_for_meeting(&pool, "m1", &call).await.unwrap();
+        MeetingChatRepository::append(&pool, "m1", &[message(ChatRole::User, "Draft a follow-up", false)]).await.unwrap();
+        MeetingChatRepository::append(&pool, "m1", &[message(ChatRole::Assistant, "Provider returned 401", true)]).await.unwrap();
+
+        let chat = MeetingChatRepository::get_for_meeting(&pool, "m1").await.unwrap();
+        let summary: Vec<(&str, ChatRole, &str, bool)> =
+            chat.iter().map(|m| (m.id.as_str(), m.role, m.text.as_str(), m.error)).collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("c1", ChatRole::User, "Who owns it?", false),
+                ("c2", ChatRole::Assistant, "Nobody yet [01:10]", false),
+                ("c3", ChatRole::User, "Draft a follow-up", false),
+                ("c4", ChatRole::Assistant, "Provider returned 401", true),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn replacing_the_chat_drops_the_old_messages() {
+        let pool = pool().await;
+        MeetingChatRepository::append(&pool, "m1", &[message(ChatRole::User, "old", false)]).await.unwrap();
+        MeetingChatRepository::replace_for_meeting(&pool, "m1", &[message(ChatRole::User, "new", false)]).await.unwrap();
+        let chat = MeetingChatRepository::get_for_meeting(&pool, "m1").await.unwrap();
+        assert_eq!(chat.len(), 1);
+        assert_eq!(chat[0].text, "new");
+        assert!(MeetingChatRepository::get_for_meeting(&pool, "other").await.unwrap().is_empty());
+    }
+}

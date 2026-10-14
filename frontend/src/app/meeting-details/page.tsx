@@ -4,10 +4,8 @@ import { useState, useEffect, useCallback, Suspense } from "react";
 import { MeetingSummary, SummaryProcessResponse, Transcript } from "@/types";
 import PageContent from "./page-content";
 import { useRouter, useSearchParams } from "next/navigation";
-import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
 import { LoaderIcon } from "lucide-react";
-import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
 import { parseSummaryContent } from "@/lib/summary-content";
 
@@ -25,7 +23,6 @@ function MeetingDetailsContent() {
   const meetingId = searchParams.get('id');
   const source = searchParams.get('source'); // Check if navigated from recording
   const { setCurrentMeeting, refetchMeetings } = useSidebar();
-  const { isAutoSummary } = useConfig(); // Get auto-summary toggle state
   const router = useRouter();
   const [meetingDetails, setMeetingDetails] = useState<MeetingDetailsResponse | null>(null);
   const [summaryResponse, setSummaryResponse] = useState<SummaryProcessResponse | null>(null);
@@ -74,13 +71,6 @@ function MeetingDetailsContent() {
       return;
     }
 
-    // Respect user's auto-summary toggle preference
-    if (!isAutoSummary) {
-      console.log('Auto-summary is disabled in settings');
-      setHasCheckedAutoGen(true);
-      return;
-    }
-
     try {
       // Check what's currently in database
       const currentConfig = await invoke('api_get_model_config') as any;
@@ -99,7 +89,7 @@ function MeetingDetailsContent() {
       if (hasGemma) {
         console.log('💾 DB empty, using gemma3:1b as initial default');
 
-        await invoke('api_save_summary_model', {
+        await invoke('api_save_ai_model', {
           provider: 'ollama',
           model: 'gemma3:1b',
         });
@@ -113,7 +103,7 @@ function MeetingDetailsContent() {
     }
 
     setHasCheckedAutoGen(true);
-  }, [hasCheckedAutoGen, checkForGemmaModel, source, isAutoSummary]);
+  }, [hasCheckedAutoGen, checkForGemmaModel, source]);
 
   // Sync meeting metadata from pagination hook to meeting details state
   useEffect(() => {
@@ -178,7 +168,6 @@ function MeetingDetailsContent() {
       console.warn('No valid meeting ID in URL - meetingId:', meetingId);
       setError("No meeting selected");
       setIsLoading(false);
-      Analytics.trackPageView('meeting_details');
       return;
     }
 

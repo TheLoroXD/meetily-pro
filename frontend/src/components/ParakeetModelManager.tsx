@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
+import { DEFAULT_PARAKEET_MODEL } from '@/constants/modelDefaults';
 import {
   ModelStatus,
   ParakeetAPI,
@@ -342,45 +343,24 @@ export function ParakeetModelManager({ className = '', onModelsChange }: { class
     );
   }
 
-  const recommendedModel = models.find(m =>
-    m.name === 'parakeet-tdt-0.6b-v3-int8'
-  );
-  const otherModels = models.filter(m =>
-    m.name !== 'parakeet-tdt-0.6b-v3-int8'
-  );
+  const ordered = [
+    ...models.filter((m) => m.name === DEFAULT_PARAKEET_MODEL),
+    ...models.filter((m) => m.name !== DEFAULT_PARAKEET_MODEL),
+  ];
 
   return (
     <div className={`space-y-3 ${className}`}>
-      {/* Recommended Model */}
-      {recommendedModel && (
+      {ordered.map(model => (
         <ModelCard
-          model={recommendedModel}
-          isRecommended={true}
-          onDownload={() => downloadModel(recommendedModel.name)}
-          onCancel={() => cancelDownload(recommendedModel.name)}
-          onDelete={() => deleteModel(recommendedModel.name)}
-          isDownloading={downloadingModels.has(recommendedModel.name)}
-          isCancelling={cancellingModels.has(recommendedModel.name)}
+          key={model.name}
+          model={model}
+          onDownload={() => downloadModel(model.name)}
+          onCancel={() => cancelDownload(model.name)}
+          onDelete={() => deleteModel(model.name)}
+          isDownloading={downloadingModels.has(model.name)}
+          isCancelling={cancellingModels.has(model.name)}
         />
-      )}
-
-      {/* Other Models */}
-      {otherModels.length > 0 && (
-        <div className="space-y-3">
-          {otherModels.map(model => (
-            <ModelCard
-              key={model.name}
-              model={model}
-              isRecommended={false}
-              onDownload={() => downloadModel(model.name)}
-              onCancel={() => cancelDownload(model.name)}
-              onDelete={() => deleteModel(model.name)}
-              isDownloading={downloadingModels.has(model.name)}
-              isCancelling={cancellingModels.has(model.name)}
-            />
-          ))}
-        </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -388,7 +368,6 @@ export function ParakeetModelManager({ className = '', onModelsChange }: { class
 // Model Card Component
 interface ModelCardProps {
   model: ParakeetModelInfo;
-  isRecommended: boolean;
   onDownload: () => void;
   onCancel: () => void;
   onDelete: () => void;
@@ -398,7 +377,6 @@ interface ModelCardProps {
 
 function ModelCard({
   model,
-  isRecommended,
   onDownload,
   onCancel,
   onDelete,
@@ -429,23 +407,16 @@ function ModelCard({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       className={`
-        relative rounded-lg border-2 transition-all
+        rounded-lg border-2 transition-all
         ${isAvailable
           ? 'border-gray-200 hover:border-gray-300 bg-white'
           : 'border-gray-200 bg-gray-50'
         }
       `}
     >
-      {/* Recommended Badge */}
-      {isRecommended && (
-        <div className="absolute -top-2 -right-2 bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full font-medium">
-          Recommended
-        </div>
-      )}
-
       <div className="p-4">
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex-1">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 flex-1">
             {/* Model Name */}
             <div className="flex items-center gap-2 mb-1">
               <span className="text-2xl">{icon}</span>
@@ -457,7 +428,7 @@ function ModelCard({
           </div>
 
           {/* Status/Action */}
-          <div className="ml-4 flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {isAvailable && !isCancelling && (
               <>
                 <div className="flex items-center gap-1.5 text-green-600">

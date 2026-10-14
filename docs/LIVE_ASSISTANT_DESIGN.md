@@ -1,7 +1,7 @@
 # Live Assistant: design record
 
 Status: implemented and released in v1.0.0, later iterations on main (Claude Code provider still phase 2). Date: 2026-10-12.
-Scope: one PR on the asidko/meetily fork. Phase 2 (Claude Code provider) has its contract locked here but ships later.
+Scope: one PR on the asidko/meetily-pro fork. Phase 2 (Claude Code provider) has its contract locked here but ships later.
 
 ## Problem
 
@@ -110,7 +110,7 @@ Language: `detect_summary_language` on the window, else "the transcript's langua
 - Feature on by default. Local providers run without a prompt: built-in, Ollama on localhost. An `ollamaEndpoint` that is not localhost counts as cloud. A cloud provider sends nothing until confirmed: the session starts paused without an error or toast, and the panel's Allow button (or Confirm in Settings) records consent and resumes it. Until then Pause, Suggest now and chat are disabled.
 - Cloud providers require a one-time per-provider confirmation dialog naming the provider and stating that other participants' words are sent repeatedly during the meeting. Stored per provider; re-confirm on provider change. Summary consent is never inherited.
 - Persistent badge while recording: "Sending to <Provider>", "Needs permission" before consent, "On device" for local providers; the model is in its tooltip. Pause cancels in-flight requests.
-- Model pick in Settings, Models, AI assistant model: "Same as summary" (the default) or any model that is ready right now from the providers set up on the same page. API keys, the Ollama URL and the custom endpoint are shared with the summary model. Provider config is re-read from the DB on every tick.
+- The assistant uses the one AI model picked in Settings, Models, the same model that writes summaries. A model picked for the assistant alone in older versions becomes that AI model once at startup. Provider config is re-read from the DB on every tick.
 - All calls go through Rust `reqwest`, never from the webview.
 
 ### D10. Sidecar contention
@@ -126,9 +126,9 @@ Existing items stay on screen. Header shows the reason and a Retry button. Expon
 ### D12. Persistence
 
 - New migration `<timestamp>_add_meeting_suggestions.sql`: `meeting_suggestions(id TEXT PK, meeting_id TEXT, kind TEXT, text TEXT, why TEXT, at_seconds REAL, sequence_id INTEGER, pinned INTEGER, dismissed INTEGER, created_at TEXT)`. Deleted explicitly in `delete_meeting_with_transaction` like the other child tables; the foreign key also cascades.
-- The meeting row exists only after stop, so suggestions live in the session until `useRecordingStop` saves the meeting, then `api_save_meeting_suggestions` runs.
-- Crash recovery bypasses stop: write `suggestions.json` (suggestions, state, chat) into the meeting folder next to `metadata.json` (atomic tmp + rename) after every successful tick, every chat reply and every pin or dismiss; `useTranscriptRecovery` imports the suggestions.
-- Settings in `tauri-plugin-store` `assistant-preferences.json`: `enabled` (default true), `provider`, `model`, `cloud_consent: {provider: bool}`. Whether the pane is open is a per-window UI preference in `localStorage`. Credentials stay in SQLite `SettingsRepository`.
+- The meeting row exists only after stop, so suggestions live in the session until `useRecordingStop` saves the meeting, then `api_save_meeting_assistant` stores its suggestions and chat.
+- Crash recovery bypasses stop: write `suggestions.json` (suggestions, state, chat) into the meeting folder next to `metadata.json` (atomic tmp + rename) after every successful tick, every chat reply and every pin or dismiss; `useTranscriptRecovery` imports the suggestions and chat.
+- Settings in `tauri-plugin-store` `assistant-preferences.json`: `enabled` (default true), `cloud_consent: {provider: bool}`. Whether the pane is open is a per-window UI preference in `localStorage`. Credentials stay in SQLite `SettingsRepository`.
 - Provider error bodies never reach the UI or logs: an HTTP failure is reported as "Provider returned 401 Unauthorized".
 - Logs never contain prompt, response, or provider error bodies; log provider, model, tick number, duration, item counts.
 
@@ -142,11 +142,11 @@ Existing items stay on screen. Header shows the reason and a Retry button. Expon
 - Thinking indicator: pulsing dot in the header, never a spinner over content.
 - Session starts with recording when enabled; the toggle only shows or hides the pane. On reload the pane resyncs via `get_live_assistant_state`.
 - Chat under the suggestions: a text box and Send button (D14). Clicking a suggestion asks about it in the chat.
-- Meeting details: read-only "During call" section under `SummaryPanel` with timestamp links to playback. Pinned items are appended to the summary generation prompt as "Pinned during call".
+- Meeting details: an Assistant panel next to the transcript. The summary sits in a collapsible bubble above the chat, which continues from the recording. Suggestions are not shown after the call; pinned items are appended to the summary generation prompt as "Pinned during call".
 
 ### D14. Chat
 
-A question goes to the assistant's provider with the title, the model's state notes, the open suggestions, the last 12 chat messages and as much recent transcript as the budget allows. The answer is plain text with [mm:ss] citations that scroll the transcript; a citation that matches no transcript segment is shown as plain text, not a link. One question is in flight at a time and it runs alongside ticks; the built-in sidecar serializes them. Chat lives in the session, survives reload and turning the assistant off and on within a recording, and clears when a new recording starts. A failed answer shows as a red reply and is left out of later prompts.
+A question goes to the assistant's provider with the title, the model's state notes, the open suggestions, the last 12 chat messages and as much recent transcript as the budget allows. The answer is plain text with [mm:ss] citations that scroll the transcript; a citation that matches no transcript segment is shown as plain text, not a link. One question is in flight at a time and it runs alongside ticks; the built-in sidecar serializes them. Chat lives in the session, survives reload and turning the assistant off and on within a recording, and clears when a new recording starts. On stop it is saved with the meeting (`meeting_chat_messages`). On the meeting page the user keeps asking: `api_ask_meeting_assistant` sends the title, the summary, the chat and as much of the saved transcript as fits (24000 tokens for OpenAI, Claude and OpenRouter), with no cloud confirmation because the user asks explicitly, as for summaries. Only summaries saved as markdown reach the prompt; older formats are left out. One answer per meeting is in flight at a time. A failed answer shows as a red reply and is left out of later prompts.
 
 ## Contracts
 
@@ -180,8 +180,9 @@ Data (`api_` prefix):
 - `api_get_assistant_settings() -> AssistantSettings`
 - `api_save_assistant_settings(settings: AssistantSettings)`
 - `api_get_meeting_suggestions(meeting_id) -> Vec<StoredSuggestion>`
-- `api_save_meeting_suggestions(meeting_id)`: stores the suggestions of the session that just ended
-- `api_import_assistant_snapshot(meeting_id, folder)`: reads `suggestions.json` from a recovered meeting folder
+- `api_save_meeting_assistant(meeting_id)`: stores the suggestions and chat of the session that just ended
+- `api_get_meeting_chat(meeting_id) -> { messages, answering }` and `api_ask_meeting_assistant(meeting_id, question) -> messages`: the chat after the call
+- `api_import_assistant_snapshot(meeting_id, folder)`: reads `suggestions.json` (suggestions and chat) from a recovered meeting folder
 - `claude_code_is_available() -> { installed: bool, version: Option<String>, logged_in: bool }` (phase 2)
 
 ### Events
@@ -194,9 +195,9 @@ Data (`api_` prefix):
 - `services/assistantService.ts`: 1:1 invoke and listen wrappers.
 - `hooks/useLiveAssistant.ts`: listeners, resync on mount while recording, local pin/dismiss optimistic update.
 - `app/_components/AssistantPanel.tsx`: pane; mounted as a sibling of `TranscriptPanel` in `page.tsx` with one JSX line.
-- `components/model-settings/AssistantModelSettings.tsx` on the Settings page, Models tab: enable switch, model pick, consent status per provider.
+- `components/model-settings/LiveAssistantSettings.tsx` on the Settings page, Models tab, under the AI model: enable switch and consent status for the AI model's provider.
 - `components/AssistantConsentDialog.tsx`.
-- `hooks/meeting-details/useMeetingSuggestions.ts` and a section in `MeetingDetails/SummaryPanel.tsx`.
+- `components/MeetingDetails/MeetingAssistantPanel.tsx`, `SummaryBubble.tsx` and `hooks/meeting-details/useMeetingChat.ts` on the meeting page.
 - `configService.ts`, `lib/model-catalog.ts` and `components/model-settings/` learn the new provider in phase 2.
 
 ## Phase 2: Claude Code CLI provider
@@ -231,7 +232,7 @@ Rust unit tests (inline `#[cfg(test)]`, run with `cargo test -p meetily assistan
 
 Bun tests (`frontend/tests/hooks/live-assistant.test.tsx`, `tests/lib/assistant-service.test.ts`): hook with mocked `invoke` and `listen`, resync on mount, optimistic pin and dismiss, panel render states (idle, generating, stale, error, cloud badge). Restore mocked modules in `afterAll`.
 
-Runtime proof before merge: one real recording with Ollama and one with the built-in model, suggestions appearing and surviving a page reload, a dismissed item not returning, details page showing the "During call" section. Screenshot saved to `~/Downloads/live-assistant-<provider>.png`.
+Runtime proof before merge: one real recording with Ollama and one with the built-in model, suggestions appearing and surviving a page reload, a dismissed item not returning, details page showing the chat from the call. Screenshot saved to `~/Downloads/live-assistant-<provider>.png`.
 
 ## Risks
 

@@ -776,7 +776,7 @@ pub struct RetranscriptionStarted {
     pub message: String,
 }
 
-// Start retranscription (Beta gated using configContext.betaFeatures)
+// Start retranscription
 #[tauri::command]
 pub async fn start_retranscription_command<R: Runtime>(
     app: AppHandle<R>,
@@ -1026,7 +1026,6 @@ mod tests {
                 "meeting_id": "existing-meeting",
                 "duration_seconds": 2523.2,
                 "audio_file": "recording.m4a",
-                "summary_language": "fr",
                 "detected_summary_language": "en",
                 "custom_field": "preserve me"
             }))
@@ -1047,7 +1046,6 @@ mod tests {
         assert_eq!(metadata["duration_seconds"], 5046.4);
         assert_eq!(metadata["meeting_id"], "existing-meeting");
         assert_eq!(metadata["audio_file"], "recording.m4a");
-        assert_eq!(metadata["summary_language"], "fr");
         assert_eq!(metadata["custom_field"], "preserve me");
         assert!(metadata.get("detected_summary_language").is_none());
     }

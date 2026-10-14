@@ -1,15 +1,14 @@
 'use client';
 
-import { memo, useEffect, useRef, useState, type FormEvent } from 'react';
-import { Copy, Pin, PinOff, Pause, Play, RefreshCw, Send, Sparkles, X, ChevronRight, ChevronLeft } from 'lucide-react';
+import { memo, useEffect, useState } from 'react';
+import { Copy, Pin, PinOff, Pause, Play, RefreshCw, Sparkles, X, ChevronRight, ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { useLiveAssistant } from '@/hooks/useLiveAssistant';
 import { catalogLabel } from '@/lib/model-catalog';
-import { KIND_META, describeAge, formatClock, hasCloudConsent, sortSuggestions, splitCitations, withCloudConsent, type AssistantSettings, type ChatMessage, type Suggestion } from '@/lib/live-assistant';
+import { KIND_META, describeAge, formatClock, hasCloudConsent, sortSuggestions, withCloudConsent, type AssistantSettings, type Suggestion } from '@/lib/live-assistant';
 import { assistantService } from '@/services/assistantService';
-import { SCROLL_TO_SEGMENT_EVENT } from '@/components/VirtualizedTranscriptView';
+import { ChatInput, ChatThread, ClockLink } from '@/components/AssistantChat';
 import { AssistantConsentDialog } from '@/components/AssistantConsentDialog';
 import { toast } from 'sonner';
 
@@ -17,18 +16,6 @@ interface AssistantPanelProps {
   open: boolean;
   isRecording: boolean;
   onToggle: () => void;
-}
-
-function scrollToSegment(atSeconds: number) {
-  window.dispatchEvent(new CustomEvent(SCROLL_TO_SEGMENT_EVENT, { detail: { atSeconds } }));
-}
-
-function ClockLink({ seconds, label, className }: { seconds: number; label: string; className: string }) {
-  return (
-    <button type="button" className={`font-mono ${className}`} onClick={() => scrollToSegment(seconds)} title="Show in transcript">
-      {label}
-    </button>
-  );
 }
 
 function NextTickBar({ initial, generating, local }: { initial: number; generating: boolean; local: boolean }) {
@@ -63,33 +50,6 @@ function NextTickBar({ initial, generating, local }: { initial: number; generati
       <Progress value={generating ? 100 : progress} className={`h-1.5 ${generating ? 'animate-pulse' : ''}`} />
       <div className="text-[11px] text-gray-500">{label}</div>
     </div>
-  );
-}
-
-function ChatInput({ active, canSend, onSend }: { active: boolean; canSend: boolean; onSend: (question: string) => Promise<boolean> }) {
-  const [draft, setDraft] = useState('');
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    const text = draft.trim();
-    if (!text || !canSend) return;
-    setDraft('');
-    if (!(await onSend(text))) setDraft(text);
-  };
-
-  return (
-    <form onSubmit={submit} className="p-3 border-t border-gray-200 flex items-center gap-2">
-      <Input
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        placeholder={active ? 'Ask the assistant' : 'Start recording to chat'}
-        disabled={!active}
-        className="h-9 text-sm"
-      />
-      <Button type="submit" size="sm" className="h-9 px-3" disabled={!canSend || !draft.trim()} title="Send">
-        <Send size={14} />
-      </Button>
-    </form>
   );
 }
 
@@ -128,36 +88,12 @@ function SuggestionCard({ item, onPin, onDismiss, onAsk }: { item: Suggestion; o
   );
 }
 
-const ChatBubble = memo(function ChatBubble({ message }: { message: ChatMessage }) {
-  if (message.role === 'user') {
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg bg-blue-600 text-white px-3 py-2 text-sm whitespace-pre-wrap">{message.text}</div>
-      </div>
-    );
-  }
-  return (
-    <div className={`max-w-[90%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${message.error ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-800'}`}>
-      {splitCitations(message.text).map((part, index) => ('clock' in part ? (
-        <ClockLink key={index} seconds={part.seconds} label={`[${part.clock}]`} className="text-blue-600 hover:underline" />
-      ) : (
-        <span key={index}>{part.text}</span>
-      )))}
-    </div>
-  );
-});
-
 export const AssistantPanel = memo(function AssistantPanel({ open, isRecording, onToggle }: AssistantPanelProps) {
   const { state, pin, dismiss, refresh, setPaused, ask, start } = useLiveAssistant();
   const suggestions = state.suggestions;
-  const chatEndRef = useRef<HTMLDivElement>(null);
   const [settings, setSettings] = useState<AssistantSettings | null>(null);
   const [consentFor, setConsentFor] = useState<string | null>(null);
   const [, setClock] = useState(0);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ block: 'end' });
-  }, [state.chat.length, state.chat_pending, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -290,17 +226,12 @@ export const AssistantPanel = memo(function AssistantPanel({ open, isRecording, 
           ))
         )}
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
-        {state.chat.length === 0 && !state.chat_pending && (
-          <p className="text-xs text-gray-500 text-center pt-2 px-2">
-            {state.active ? 'Ask anything about the conversation. Click a suggestion to ask about it.' : 'Chat works while a recording is running.'}
-          </p>
-        )}
-        {state.chat.map((message) => <ChatBubble key={message.id} message={message} />)}
-        {state.chat_pending && <div className="w-fit rounded-lg bg-gray-100 text-gray-500 px-3 py-2 text-sm animate-pulse">Thinking...</div>}
-        <div ref={chatEndRef} />
-      </div>
-      <ChatInput active={state.active} canSend={canChat} onSend={ask} />
+      <ChatThread
+        messages={state.chat}
+        pending={state.chat_pending}
+        emptyHint={state.active ? 'Ask anything about the conversation. Click a suggestion to ask about it.' : 'Chat works while a recording is running.'}
+      />
+      <ChatInput placeholder={state.active ? 'Ask the assistant' : 'Start recording to chat'} disabled={!state.active} canSend={canChat} onSend={ask} />
       <AssistantConsentDialog provider={consentFor} onConfirm={confirmConsent} onCancel={() => setConsentFor(null)} />
     </div>
   );

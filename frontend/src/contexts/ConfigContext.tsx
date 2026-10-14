@@ -4,8 +4,6 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { SelectedDevices } from '@/components/DeviceSelection';
 import { configService, ModelConfig, TranscriptModelProps } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
-import Analytics from '@/lib/analytics';
-import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
 
 export interface StorageLocations {
   database: string;
@@ -56,14 +54,6 @@ interface ConfigContextType {
   showConfidenceIndicator: boolean;
   toggleConfidenceIndicator: (checked: boolean) => void;
 
-  // Beta features
-  betaFeatures: BetaFeatures;
-  toggleBetaFeature: (featureKey: BetaFeatureKey, enabled: boolean) => void;
-
-  // Summary configuration
-  isAutoSummary: boolean;
-  toggleIsAutoSummary: (checked: boolean) => void;
-
   // Provider-specific API keys
   providerApiKeys: {
     claude: string | null;
@@ -83,7 +73,6 @@ interface ConfigContextType {
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 
-
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
@@ -92,7 +81,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     ollamaEndpoint: null
   });
   const [isModelConfigLoading, setIsModelConfigLoading] = useState(true);
-
 
   // Transcript model configuration state
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
@@ -136,20 +124,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       return saved !== null ? saved === 'true' : true;
     }
     return true;
-  });
-
-  // Summary configs
-  const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('isAutoSummary');
-      return saved !== null ? saved === 'true' : false
-    }
-    return false;
-  });
-
-  // Beta features state (localStorage)
-  const [betaFeatures, setBetaFeatures] = useState<BetaFeatures>(() => {
-    return loadBetaFeatures();
   });
 
   // Preference settings state (lazy loaded)
@@ -269,29 +243,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new CustomEvent('confidenceIndicatorChanged', { detail: checked }));
   }, []);
 
-  const toggleIsAutoSummary = useCallback((checked: boolean) => {
-    setisAutoSummary(checked);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('isAutoSummary', checked.toString());
-    }
-  }, [])
-
-  // Toggle beta feature with localStorage persistence and analytics
-  const toggleBetaFeature = useCallback((featureKey: BetaFeatureKey, enabled: boolean) => {
-    setBetaFeatures(prev => {
-      const updated = { ...prev, [featureKey]: enabled };
-      saveBetaFeatures(updated);
-
-      // Track analytics with specific feature
-      Analytics.track('beta_feature_toggled', {
-        feature: featureKey,
-        enabled: enabled.toString(),
-      }).catch(err => console.error('Failed to track beta feature toggle:', err));
-
-      return updated;
-    });
-  }, []);
-
   // Update individual provider API key
   const updateProviderApiKey = useCallback((provider: string, apiKey: string | null) => {
     setProviderApiKeys(prev => ({ ...prev, [provider]: apiKey }));
@@ -373,8 +324,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     modelConfig,
     setModelConfig,
     isModelConfigLoading,
-    isAutoSummary,
-    toggleIsAutoSummary,
     providerApiKeys,
     updateProviderApiKey,
     transcriptModelConfig,
@@ -385,8 +334,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     setSelectedLanguage: handleSetSelectedLanguage,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
-    betaFeatures,
-    toggleBetaFeature,
     notificationSettings,
     storageLocations,
     isLoadingPreferences,
@@ -395,8 +342,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   }), [
     modelConfig,
     isModelConfigLoading,
-    isAutoSummary,
-    toggleIsAutoSummary,
     providerApiKeys,
     updateProviderApiKey,
     transcriptModelConfig,
@@ -405,8 +350,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     handleSetSelectedLanguage,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
-    betaFeatures,
-    toggleBetaFeature,
     notificationSettings,
     storageLocations,
     isLoadingPreferences,

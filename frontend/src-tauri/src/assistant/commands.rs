@@ -1,8 +1,10 @@
 use tauri::{AppHandle, Runtime};
 
-use super::prompt::Suggestion;
+use super::meeting_chat;
+use super::prompt::{ChatMessage, Suggestion};
 use super::service::{self, LiveAssistantState};
 use super::settings::{self, AssistantSettings};
+use crate::database::repositories::chat::MeetingChatRepository;
 use crate::database::repositories::suggestion::MeetingSuggestionsRepository;
 use crate::state::AppState;
 
@@ -68,18 +70,51 @@ pub async fn api_get_meeting_suggestions(
         .map_err(|e| e.to_string())
 }
 
-async fn store_suggestions(
+#[derive(serde::Serialize)]
+pub struct MeetingChat {
+    messages: Vec<ChatMessage>,
+    answering: bool,
+}
+
+#[tauri::command]
+pub async fn api_get_meeting_chat(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<MeetingChat, String> {
+    let answering = meeting_chat::is_answering(&meeting_id);
+    let messages = MeetingChatRepository::get_for_meeting(state.db_manager.pool(), &meeting_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(MeetingChat { messages, answering })
+}
+
+#[tauri::command]
+pub async fn api_ask_meeting_assistant<R: Runtime>(
+    app: AppHandle<R>,
+    meeting_id: String,
+    question: String,
+) -> Result<Vec<ChatMessage>, String> {
+    meeting_chat::ask(&app, &meeting_id, question).await
+}
+
+async fn store_session(
     state: &AppState,
     meeting_id: &str,
     suggestions: &[Suggestion],
-) -> Result<usize, String> {
-    if suggestions.is_empty() {
-        return Ok(0);
+    chat: &[ChatMessage],
+) -> Result<(), String> {
+    let pool = state.db_manager.pool();
+    if !suggestions.is_empty() {
+        MeetingSuggestionsRepository::replace_for_meeting(pool, meeting_id, suggestions)
+            .await
+            .map_err(|e| e.to_string())?;
     }
-    MeetingSuggestionsRepository::replace_for_meeting(state.db_manager.pool(), meeting_id, suggestions)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(suggestions.len())
+    if !chat.is_empty() {
+        MeetingChatRepository::replace_for_meeting(pool, meeting_id, chat)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -87,16 +122,17 @@ pub async fn api_import_assistant_snapshot(
     state: tauri::State<'_, AppState>,
     meeting_id: String,
     folder: String,
-) -> Result<usize, String> {
-    let suggestions = service::read_snapshot(std::path::Path::new(&folder)).unwrap_or_default();
-    store_suggestions(&state, &meeting_id, &suggestions).await
+) -> Result<(), String> {
+    let (suggestions, chat) = service::read_snapshot(std::path::Path::new(&folder));
+    store_session(&state, &meeting_id, &suggestions, &chat).await
 }
 
 #[tauri::command]
-pub async fn api_save_meeting_suggestions<R: Runtime>(
+pub async fn api_save_meeting_assistant<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_id: String,
-) -> Result<usize, String> {
-    store_suggestions(&state, &meeting_id, &service::snapshot(&app).suggestions).await
+) -> Result<(), String> {
+    let session = service::snapshot(&app);
+    store_session(&state, &meeting_id, &session.suggestions, &session.chat).await
 }

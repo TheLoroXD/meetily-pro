@@ -93,3 +93,77 @@ export function parseSummaryContent(value: unknown): MeetingSummary | null {
   }
   return hasVisibleSummaryContent(value) ? value : null;
 }
+
+function inlineText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map((item) => {
+    const object = parseSummaryObject(item);
+    if (!object) return '';
+    const text = typeof object.text === 'string' ? object.text : inlineText(object.content);
+    return object.type === 'link' && typeof object.href === 'string' ? `[${text}](${object.href})` : text;
+  }).join('');
+}
+
+const BLOCK_PREFIX: Record<string, string> = {
+  bulletListItem: '- ',
+  numberedListItem: '1. ',
+  checkListItem: '- [ ] ',
+};
+
+interface MarkdownLine {
+  text: string;
+  list: boolean;
+}
+
+function blocksToLines(blocks: unknown, indent = ''): MarkdownLine[] {
+  if (!Array.isArray(blocks)) return [];
+  return blocks.flatMap((block) => {
+    const object = parseSummaryObject(block);
+    if (!object) return [];
+    const text = inlineText(object.content).trim();
+    const props = parseSummaryObject(object.props);
+    const level = typeof props?.level === 'number' ? props.level : 2;
+    const type = typeof object.type === 'string' ? object.type : 'paragraph';
+    const prefix = type === 'checkListItem' && props?.checked === true ? '- [x] ' : BLOCK_PREFIX[type] ?? '';
+    const list = prefix !== '';
+    const line = type === 'heading' ? `${'#'.repeat(level)} ${text}` : `${indent}${prefix}${text}`;
+    const childIndent = indent + ' '.repeat(type === 'numberedListItem' ? 3 : list ? 2 : 0);
+    return [...(text ? [{ text: line, list }] : []), ...blocksToLines(object.children, childIndent)];
+  });
+}
+
+function joinLines(lines: MarkdownLine[]): string {
+  return lines
+    .map((line, index) => (index === 0 ? '' : line.list && lines[index - 1].list ? '\n' : '\n\n') + line.text)
+    .join('');
+}
+
+function legacyToMarkdown(object: Record<string, unknown>): string {
+  const order = Array.isArray(object._section_order)
+    ? object._section_order.filter((key): key is string => typeof key === 'string')
+    : Object.keys(object);
+  return order
+    .filter((key) => key !== 'MeetingName' && key !== '_section_order')
+    .map((key) => {
+      const section = parseSummaryObject(object[key]);
+      if (!section || !Array.isArray(section.blocks)) return '';
+      const items = section.blocks
+        .map((block) => parseSummaryObject(block)?.content)
+        .filter((content): content is string => typeof content === 'string' && content.trim().length > 0)
+        .map((content) => `- ${content.trim()}`);
+      if (items.length === 0) return '';
+      const title = typeof section.title === 'string' ? section.title : key;
+      return `## ${title}\n\n${items.join('\n')}`;
+    })
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+export function summaryToMarkdown(summary: MeetingSummary | null): string {
+  if (!hasVisibleSummaryContent(summary)) return '';
+  const object = parseSummaryObject(summary) ?? {};
+  if (typeof object.markdown === 'string') return object.markdown.trim();
+  if ('summary_json' in object) return joinLines(blocksToLines(object.summary_json));
+  return legacyToMarkdown(object);
+}

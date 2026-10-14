@@ -22,7 +22,7 @@ interface UsePaginatedTranscriptsReturn {
     error: string | null;
 
     // Actions
-    loadMore: () => Promise<void>;
+    loadMore: (all?: boolean) => Promise<void>;
     reset: () => void;
     refetch: () => Promise<void>;
 }
@@ -101,7 +101,8 @@ export function usePaginatedTranscripts({
     const loadTranscriptsAtOffset = useCallback(async (
         requestId: number,
         offset: number,
-        append: boolean = true
+        append: boolean = true,
+        limit: number = DEFAULT_PAGE_SIZE
     ): Promise<Transcript[]> => {
         if (!meetingId || !isCurrentRequest(requestId)) return [];
 
@@ -110,7 +111,7 @@ export function usePaginatedTranscripts({
                 'api_get_meeting_transcripts',
                 {
                     meetingId,
-                    limit: DEFAULT_PAGE_SIZE,
+                    limit,
                     offset,
                 }
             );
@@ -147,12 +148,12 @@ export function usePaginatedTranscripts({
     }, [meetingId, isCurrentRequest]);
 
     // Load next page with debounce protection
-    const loadMore = useCallback(async () => {
+    const loadMore = useCallback(async (all: boolean = false) => {
         const requestId = requestIdRef.current;
         if (!isCurrentRequest(requestId)) return;
         const now = Date.now();
         // Debounce: require at least 100ms between calls
-        if (now - lastLoadTimeRef.current < 100) {
+        if (!all && now - lastLoadTimeRef.current < 100) {
             return;
         }
 
@@ -162,14 +163,15 @@ export function usePaginatedTranscripts({
         isLoadingRef.current = true;
         setIsLoadingMore(true);
         try {
-            await loadTranscriptsAtOffset(requestId, offsetRef.current, true);
+            const limit = all ? Math.max(totalCount - offsetRef.current, DEFAULT_PAGE_SIZE) : DEFAULT_PAGE_SIZE;
+            await loadTranscriptsAtOffset(requestId, offsetRef.current, true, limit);
         } finally {
             if (isCurrentRequest(requestId)) {
                 setIsLoadingMore(false);
                 isLoadingRef.current = false;
             }
         }
-    }, [hasMore, meetingId, loadTranscriptsAtOffset, isLoading, isCurrentRequest]);
+    }, [hasMore, meetingId, loadTranscriptsAtOffset, isLoading, isCurrentRequest, totalCount]);
 
     // Force refetch of data (e.g., after retranscription)
     const refetch = useCallback(async () => {

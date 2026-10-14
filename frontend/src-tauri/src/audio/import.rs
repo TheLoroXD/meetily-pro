@@ -960,7 +960,7 @@ pub async fn validate_audio_file_command(path: String) -> Result<AudioFileInfo, 
     validate_audio_file(Path::new(&path)).map_err(|e| e.to_string())
 }
 
-/// Start importing an audio file (Beta gated using configContext.betaFeatures)
+/// Start importing an audio file
 #[tauri::command]
 pub async fn start_import_audio_command<R: Runtime>(
     app: AppHandle<R>,

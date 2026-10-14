@@ -8,13 +8,9 @@ import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateCon
 import { storageService } from '@/services/storageService';
 import { assistantService } from '@/services/assistantService';
 import { transcriptService } from '@/services/transcriptService';
-import Analytics from '@/lib/analytics';
-import {
-  applyPinnedSummaryLanguageToMeeting,
-  detectAndCacheSummaryLanguage,
-} from '@/lib/summary-language-preferences';
+import { detectAndCacheSummaryLanguage } from '@/lib/summary-language-preferences';
 
-type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
+import type { SummaryStatus } from '@/hooks/meeting-details/useSummaryGeneration';
 
 interface UseRecordingStopReturn {
   handleRecordingStop: (callApi: boolean) => Promise<void>;
@@ -33,7 +29,6 @@ interface UseRecordingStopReturn {
  * - Transcription completion polling (60s max, 500ms interval)
  * - Transcript buffer flush coordination
  * - SQLite meeting save with folder_path from sessionStorage
- * - Comprehensive analytics tracking (duration, word count, activation)
  * - Auto-navigation to meeting details
  * - Toast notifications for success/error
  * - Window exposure for Rust callbacks
@@ -266,28 +261,16 @@ export function useRecordingStop(
             throw new Error('No meeting ID received from save operation');
           }
 
-          let shouldDetectSummaryLanguage = false;
           try {
-            shouldDetectSummaryLanguage = !(await applyPinnedSummaryLanguageToMeeting(meetingId));
+            await detectAndCacheSummaryLanguage(
+              meetingId,
+              freshTranscripts.map(t => t.text)
+            );
           } catch (error) {
-            console.warn('Failed to apply pinned summary language preference for new meeting:', error);
-            toast.warning('Could not apply default summary language', {
-              description: 'The meeting was saved, but the default summary language was not applied.',
+            console.warn('Failed to detect summary language for new meeting:', error);
+            toast.warning('Could not detect summary language', {
+              description: 'The meeting was saved, but its summary language could not be detected.',
             });
-          }
-
-          if (shouldDetectSummaryLanguage) {
-            try {
-              await detectAndCacheSummaryLanguage(
-                meetingId,
-                freshTranscripts.map(t => t.text)
-              );
-            } catch (error) {
-              console.warn('Failed to detect summary language for new meeting:', error);
-              toast.warning('Could not detect summary language', {
-                description: 'The meeting was saved, but Auto could not detect the summary language.',
-              });
-            }
           }
 
           console.log('✅ Successfully saved COMPLETE meeting with ID:', meetingId);
@@ -298,9 +281,9 @@ export function useRecordingStop(
           await markMeetingAsSaved();
 
           try {
-            await assistantService.saveMeetingSuggestions(meetingId);
+            await assistantService.saveMeetingAssistant(meetingId);
           } catch (error) {
-            console.warn('Failed to store live assistant suggestions:', error);
+            console.warn('Failed to store the live assistant chat:', error);
           }
 
           // Clean up session storage
@@ -336,7 +319,6 @@ export function useRecordingStop(
               label: 'View Meeting',
               onClick: () => {
                 router.push(`/meeting-details?id=${meetingId}`);
-                Analytics.trackButtonClick('view_meeting_from_toast', 'recording_complete');
               }
             },
             duration: 10000,
@@ -346,61 +328,10 @@ export function useRecordingStop(
           setTimeout(() => {
             router.push(`/meeting-details?id=${meetingId}&source=recording`);
             clearTranscripts()
-            Analytics.trackPageView('meeting_details');
 
             // Reset to IDLE after navigation
             setStatus(RecordingStatus.IDLE);
           }, 2000);
-          // Track meeting completion analytics
-          try {
-            // Calculate meeting duration from transcript timestamps
-            let durationSeconds = 0;
-            if (freshTranscripts.length > 0 && freshTranscripts[0].audio_start_time !== undefined) {
-              // Use audio_end_time of last transcript if available
-              const lastTranscript = freshTranscripts[freshTranscripts.length - 1];
-              durationSeconds = lastTranscript.audio_end_time || lastTranscript.audio_start_time || 0;
-            }
-
-            // Calculate word count
-            const transcriptWordCount = freshTranscripts
-              .map(t => t.text.split(/\s+/).length)
-              .reduce((a, b) => a + b, 0);
-
-            // Calculate words per minute
-            const wordsPerMinute = durationSeconds > 0 ? transcriptWordCount / (durationSeconds / 60) : 0;
-
-            // Get meetings count today
-            const meetingsToday = await Analytics.getMeetingsCountToday();
-
-            // Track meeting completed
-            await Analytics.trackMeetingCompleted(meetingId, {
-              duration_seconds: durationSeconds,
-              transcript_segments: freshTranscripts.length,
-              transcript_word_count: transcriptWordCount,
-              words_per_minute: wordsPerMinute,
-              meetings_today: meetingsToday
-            });
-
-            // Update meeting count in analytics.json
-            await Analytics.updateMeetingCount();
-
-            // Check for activation (first meeting)
-            const { Store } = await import('@tauri-apps/plugin-store');
-            const store = await Store.load('analytics.json');
-            const totalMeetings = await store.get<number>('total_meetings');
-
-            if (totalMeetings === 1) {
-              const daysSinceInstall = await Analytics.calculateDaysSince('first_launch_date');
-              await Analytics.track('user_activated', {
-                meetings_count: '1',
-                days_since_install: daysSinceInstall?.toString() || 'null',
-                first_meeting_duration_seconds: durationSeconds.toString()
-              });
-            }
-          } catch (analyticsError) {
-            console.error('Failed to track meeting completion analytics:', analyticsError);
-            // Don't block user flow on analytics errors
-          }
 
         } catch (saveError) {
           console.error('Failed to save meeting to database:', saveError);

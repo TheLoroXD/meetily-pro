@@ -8,7 +8,7 @@ import { useConfig } from '@/contexts/ConfigContext';
 import { configService } from '@/services/configService';
 
 interface CustomServerCardProps {
-  onSaved: (model: string) => void;
+  onSaved: () => void;
 }
 
 function numberOrNull(value: string): number | null {
@@ -69,7 +69,7 @@ export function CustomServerCard({ onSaved }: CustomServerCardProps) {
       });
       setModelConfig((prev) => (prev.provider === 'custom-openai' ? { ...prev, model: nextModel } : prev));
       toast.success('Custom server saved');
-      onSaved(nextModel);
+      onSaved();
     } catch (error) {
       toast.error('Could not save the custom server', { description: String(error) });
     } finally {

@@ -83,14 +83,6 @@ impl AudioError {
     }
 }
 
-/// Recording statistics
-#[derive(Debug, Default)]
-pub struct RecordingStats {
-    pub chunks_processed: u64,
-    pub total_duration: f64,
-    pub last_activity: Option<Instant>,
-}
-
 /// Unified state management for audio recording
 pub struct RecordingState {
     // Core recording state
@@ -113,9 +105,6 @@ pub struct RecordingState {
     last_error: Mutex<Option<AudioError>>,
     error_callback: Mutex<Option<Box<dyn Fn(&AudioError) + Send + Sync>>>,
 
-    // Statistics
-    stats: Mutex<RecordingStats>,
-
     // Recording start time for accurate timestamps
     recording_start: Mutex<Option<Instant>>,
     // Pause time tracking
@@ -136,7 +125,6 @@ impl RecordingState {
             recoverable_error_count: AtomicU32::new(0),
             last_error: Mutex::new(None),
             error_callback: Mutex::new(None),
-            stats: Mutex::new(RecordingStats::default()),
             recording_start: Mutex::new(None),
             pause_start: Mutex::new(None),
             total_pause_duration: Mutex::new(std::time::Duration::ZERO),
@@ -222,10 +210,6 @@ impl RecordingState {
         *self.system_device.lock().unwrap() = Some(device);
     }
 
-    pub fn get_microphone_device(&self) -> Option<Arc<AudioDevice>> {
-        self.microphone_device.lock().unwrap().clone()
-    }
-
     pub fn get_system_device(&self) -> Option<Arc<AudioDevice>> {
         self.system_device.lock().unwrap().clone()
     }
@@ -243,11 +227,6 @@ impl RecordingState {
 
         if let Some(sender) = self.audio_sender.lock().unwrap().as_ref() {
             sender.send(chunk).map_err(|_| anyhow::anyhow!("Failed to send audio chunk"))?;
-
-            // Update statistics
-            let mut stats = self.stats.lock().unwrap();
-            stats.chunks_processed += 1;
-            stats.last_activity = Some(Instant::now());
             Ok(())
         } else {
             // Return an error when no sender is available (pipeline not ready)
@@ -308,19 +287,6 @@ impl RecordingState {
         self.last_error.lock().unwrap().clone()
     }
 
-    pub fn has_fatal_error(&self) -> bool {
-        if let Some(error) = &*self.last_error.lock().unwrap() {
-            !error.is_recoverable() && self.error_count.load(Ordering::SeqCst) > 0
-        } else {
-            false
-        }
-    }
-
-    // Statistics
-    pub fn get_stats(&self) -> RecordingStats {
-        self.stats.lock().unwrap().clone()
-    }
-
     pub fn get_recording_duration(&self) -> Option<f64> {
         self.recording_start
             .lock()
@@ -373,7 +339,6 @@ impl RecordingState {
         *self.audio_sender.lock().unwrap() = None;
         *self.last_error.lock().unwrap() = None;
         *self.error_callback.lock().unwrap() = None;
-        *self.stats.lock().unwrap() = RecordingStats::default();
         *self.recording_start.lock().unwrap() = None;
         *self.pause_start.lock().unwrap() = None;
         *self.total_pause_duration.lock().unwrap() = std::time::Duration::ZERO;
@@ -398,21 +363,9 @@ impl Default for RecordingState {
             recoverable_error_count: AtomicU32::new(0),
             last_error: Mutex::new(None),
             error_callback: Mutex::new(None),
-            stats: Mutex::new(RecordingStats::default()),
             recording_start: Mutex::new(None),
             pause_start: Mutex::new(None),
             total_pause_duration: Mutex::new(std::time::Duration::ZERO),
-        }
-    }
-}
-
-// Thread-safe cloning for RecordingStats
-impl Clone for RecordingStats {
-    fn clone(&self) -> Self {
-        Self {
-            chunks_processed: self.chunks_processed,
-            total_duration: self.total_duration,
-            last_activity: self.last_activity,
         }
     }
 }

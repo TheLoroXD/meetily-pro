@@ -1,6 +1,6 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-    "productName": "meetily",
+    "productName": "Meetily Pro",
     "version": "1.2.0",
     "identifier": "com.meetily.ai",
     "build": {
@@ -12,12 +12,11 @@
     "app": {
         "windows": [
             {
-                "title": "meetily",
+                "title": "Meetily Pro",
                 "width": 1100,
                 "height": 700,
                 "resizable": true,
                 "fullscreen": false,
-                "theme": "Light",
                 "decorations": true
             }
         ],
@@ -108,13 +107,19 @@
         },
         "windows": {
             "signCommand": "powershell -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 -FilePath %1"
+        },
+        "linux": {
+            "deb": {
+                "conflicts": ["meetily"],
+                "replaces": ["meetily"]
+            }
         }
     },
     "plugins": {
         "updater": {
             "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDQTYzMUQ3ODc5N0M4MkEKUldRcXlKZUgxekdtN09DRkVWSHNpZlJseEVOUmpNd1dDSTNaLzZ3MXJGTnY3WW1pdnlOYjBpbkIK",
             "endpoints": [
-                "https://github.com/asidko/meetily/releases/latest/download/latest.json"
+                "https://github.com/asidko/meetily-pro/releases/latest/download/latest.json"
             ]
         }
     }

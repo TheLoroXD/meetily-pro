@@ -194,7 +194,7 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
         .unwrap_or("qwen3.5:2b");
 
     // Default Summary Model: Built-in AI (Qwen recommendation for this system)
-    if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_summary_model(
+    if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_ai_model(
         pool,
         "builtin-ai",
         default_summary_model,

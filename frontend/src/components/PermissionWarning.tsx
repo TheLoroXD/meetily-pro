@@ -124,7 +124,7 @@ export function PermissionWarning({
                     <p className="font-medium">To enable system audio on macOS:</p>
                     <ul className="list-disc list-inside ml-2 space-y-1">
                       <li>Install a virtual audio device (e.g., BlackHole 2ch)</li>
-                      <li>Grant Screen Recording permission to Meetily</li>
+                      <li>Grant Screen Recording permission to Meetily Pro</li>
                       <li>Configure your audio routing in Audio MIDI Setup</li>
                     </ul>
                   </div>

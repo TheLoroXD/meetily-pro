@@ -10,7 +10,7 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use super::prompt::{self, ChatMessage, ChatRole, ModelOutput, PromptContext, Suggestion};
-use super::settings::{self, AssistantSettings};
+use super::settings;
 use crate::audio::recording_commands::{live_transcript_progress, live_transcript_snapshot, LiveTranscriptSnapshot};
 use crate::audio::recording_saver::TranscriptSegment;
 use crate::audio::transcription::hold_transcription;
@@ -461,26 +461,16 @@ pub fn snapshot<R: Runtime>(app: &AppHandle<R>) -> LiveAssistantState {
     }
 }
 
-fn db_pool<R: Runtime>(app: &AppHandle<R>) -> Result<SqlitePool, String> {
+pub(super) fn db_pool<R: Runtime>(app: &AppHandle<R>) -> Result<SqlitePool, String> {
     app.try_state::<AppState>()
         .map(|state| state.db_manager.pool().clone())
         .ok_or_else(|| "Database is not ready yet".to_string())
 }
 
-async fn resolve_target<R: Runtime>(
-    app: &AppHandle<R>,
-    settings: &AssistantSettings,
-) -> Result<(String, String), String> {
-    if let Some(provider) = settings.provider.as_deref().filter(|p| !p.trim().is_empty()) {
-        return match settings.model.as_deref().filter(|m| !m.trim().is_empty()) {
-            Some(model) => Ok((provider.to_string(), model.to_string())),
-            None => Err("Pick a model for the live assistant in Settings".to_string()),
-        };
-    }
-    let pool = db_pool(app)?;
-    match SettingsRepository::get_model_config(&pool).await {
-        Ok(Some(config)) => Ok((config.provider, config.model)),
-        Ok(None) => Err("No summary model is configured".to_string()),
+async fn resolve_target(pool: &SqlitePool) -> Result<(String, String), String> {
+    match SettingsRepository::get_model_config(pool).await {
+        Ok(Some(config)) if !config.model.trim().is_empty() => Ok((config.provider, config.model)),
+        Ok(_) => Err("Pick an AI model in Settings, Models".to_string()),
         Err(error) => Err(error.to_string()),
     }
 }
@@ -510,7 +500,7 @@ pub fn is_cloud(provider: &LLMProvider, ollama_endpoint: Option<&str>) -> bool {
     }
 }
 
-async fn input_budget(settings: &ProviderSettings, model: &str) -> usize {
+pub(super) async fn input_budget(settings: &ProviderSettings, model: &str) -> usize {
     match settings.provider {
         LLMProvider::BuiltInAI => BUILTIN_INPUT_TOKENS,
         LLMProvider::Ollama => {
@@ -537,7 +527,7 @@ fn language_name(window: &[TranscriptSegment]) -> String {
         .unwrap_or_else(|| "the transcript's language".to_string())
 }
 
-fn short_error(error: &str) -> String {
+pub(super) fn short_error(error: &str) -> String {
     if let Some(captures) = PROVIDER_STATUS.captures(error) {
         return format!("Provider returned {}", captures[1].trim());
     }
@@ -564,35 +554,42 @@ fn persist_snapshot(folder: &Path, data: &SessionData) {
     }
 }
 
-pub fn read_snapshot(folder: &Path) -> Option<Vec<Suggestion>> {
-    let raw = std::fs::read_to_string(folder.join(SNAPSHOT_FILE)).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    serde_json::from_value(value.get("suggestions")?.clone()).ok()
+pub fn read_snapshot(folder: &Path) -> (Vec<Suggestion>, Vec<ChatMessage>) {
+    let value: Option<serde_json::Value> = std::fs::read_to_string(folder.join(SNAPSHOT_FILE))
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok());
+    let field = |key: &str| value.as_ref().and_then(|v| v.get(key)).cloned();
+    (
+        field("suggestions").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
+        field("chat").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default(),
+    )
 }
 
-struct RequestPlan {
-    provider_settings: ProviderSettings,
+pub(super) struct RequestPlan {
+    pub(super) provider_settings: ProviderSettings,
     cloud: bool,
     consented: bool,
     provider_label: String,
-    model: String,
+    pub(super) model: String,
+}
+
+pub(super) async fn resolve_request<R: Runtime>(app: &AppHandle<R>) -> Result<RequestPlan, String> {
+    let pool = db_pool(app)?;
+    let (provider_label, model) = resolve_target(&pool).await?;
+    let provider_settings = resolve_provider_settings(&pool, &provider_label).await?;
+    let cloud = is_cloud(&provider_settings.provider, provider_settings.ollama_endpoint.as_deref());
+    let consented = !cloud || settings::load(app).has_cloud_consent(&provider_label);
+    Ok(RequestPlan { provider_settings, cloud, consented, provider_label, model })
 }
 
 async fn resolve_plan<R: Runtime>(app: &AppHandle<R>, data: &Arc<Mutex<SessionData>>) -> Result<RequestPlan, String> {
-    let settings = settings::load(app);
-    let (provider_label, model) = resolve_target(app, &settings).await?;
-    let pool = db_pool(app)?;
-    let provider_settings = resolve_provider_settings(&pool, &provider_label).await?;
-    let cloud = is_cloud(&provider_settings.provider, provider_settings.ollama_endpoint.as_deref());
-    {
-        let mut guard = lock_data(data);
-        guard.provider = provider_label.clone();
-        guard.model = model.clone();
-        guard.is_cloud = cloud;
-        guard.builtin = provider_settings.provider == LLMProvider::BuiltInAI;
-    }
-    let consented = !cloud || settings.has_cloud_consent(&provider_label);
-    Ok(RequestPlan { provider_settings, cloud, consented, provider_label, model })
+    let plan = resolve_request(app).await?;
+    let mut guard = lock_data(data);
+    guard.provider = plan.provider_label.clone();
+    guard.model = plan.model.clone();
+    guard.is_cloud = plan.cloud;
+    guard.builtin = plan.provider_settings.provider == LLMProvider::BuiltInAI;
+    Ok(plan)
 }
 
 async fn call_model<R: Runtime>(
@@ -673,7 +670,7 @@ async fn run_tick<R: Runtime>(
     Ok((prompt::parse_model_output(&content)?, through_seq))
 }
 
-pub async fn ask<R: Runtime>(app: &AppHandle<R>, question: String) -> Result<(), String> {
+pub(super) fn checked_question(question: String) -> Result<String, String> {
     let question = question.trim().to_string();
     if question.is_empty() {
         return Err("Type a question first".to_string());
@@ -681,6 +678,11 @@ pub async fn ask<R: Runtime>(app: &AppHandle<R>, question: String) -> Result<(),
     if question.chars().count() > MAX_QUESTION_CHARS {
         return Err(format!("Keep the question under {} characters", MAX_QUESTION_CHARS));
     }
+    Ok(question)
+}
+
+pub async fn ask<R: Runtime>(app: &AppHandle<R>, question: String) -> Result<(), String> {
+    let question = checked_question(question)?;
     let (data, token) = with_session(app, |session| (session.data.clone(), session.token.clone()))
         .ok_or_else(|| "Chat works while a recording is running".to_string())?;
     let chat_token = token.child_token();
@@ -730,9 +732,8 @@ async fn answer_chat<R: Runtime>(
     }
     let snapshot = live_transcript_snapshot().ok_or_else(|| "No active recording".to_string())?;
     let budget = input_budget(&plan.provider_settings, &plan.model).await;
-    let (prefix, history) = {
+    let (prefix, chat) = {
         let guard = lock_data(data);
-        let history = recent_chat(&guard.chat, budget / 3);
         let prefix = prompt::build_prefix(&PromptContext {
             title: snapshot.meeting_name.as_deref().unwrap_or(""),
             language_name: prompt::CHAT_LANGUAGE,
@@ -740,18 +741,46 @@ async fn answer_chat<R: Runtime>(
             open: &guard.suggestions,
             dismissed_texts: &[],
         });
-        (prefix, history)
+        (prefix, guard.chat.clone())
     };
+    let request = ChatRequest {
+        system_prompt: prompt::CHAT_SYSTEM_PROMPT,
+        prefix,
+        segments: &snapshot.segments,
+        chat: &chat,
+        budget,
+        max_tokens: CHAT_OUTPUT_TOKENS,
+    };
+    answer_question(app, &plan, request, chat_token).await
+}
+
+pub(super) struct ChatRequest<'a> {
+    pub(super) system_prompt: &'static str,
+    pub(super) prefix: String,
+    pub(super) segments: &'a [TranscriptSegment],
+    pub(super) chat: &'a [ChatMessage],
+    pub(super) budget: usize,
+    pub(super) max_tokens: u32,
+}
+
+pub(super) async fn answer_question<R: Runtime>(
+    app: &AppHandle<R>,
+    plan: &RequestPlan,
+    request: ChatRequest<'_>,
+    token: &CancellationToken,
+) -> Result<String, String> {
+    let history = recent_chat(request.chat, request.budget / 3);
     let history_tokens: usize = history.iter().map(|m| rough_token_count(&m.text)).sum();
-    let window_budget = budget
-        .saturating_sub(rough_token_count(&prefix) + history_tokens)
+    let window_budget = request
+        .budget
+        .saturating_sub(rough_token_count(&request.prefix) + history_tokens)
         .max(200);
-    let window = prompt::select_window(&snapshot.segments, window_budget);
-    let user_prompt = prompt::build_chat_prompt(prefix, window, &history);
-    info!("Live assistant chat via {}/{}", plan.provider_label, plan.model);
-    let options = CompletionOptions { json_mode: false, max_tokens: Some(CHAT_OUTPUT_TOKENS) };
-    let content = call_model(app, &plan, prompt::CHAT_SYSTEM_PROMPT, &user_prompt, chat_token, options).await?;
-    visible_chat_answer(&content, &snapshot.segments)
+    let window = prompt::select_window(request.segments, window_budget);
+    let user_prompt = prompt::build_chat_prompt(request.prefix, window, &history);
+    info!("Assistant chat via {}/{}", plan.provider_label, plan.model);
+    let options = CompletionOptions { json_mode: false, max_tokens: Some(request.max_tokens) };
+    let content = call_model(app, plan, request.system_prompt, &user_prompt, token, options).await?;
+    visible_chat_answer(&content, request.segments)
 }
 
 fn visible_chat_answer(content: &str, segments: &[TranscriptSegment]) -> Result<String, String> {

@@ -35,7 +35,6 @@ pub(crate) use perf_trace;
 // Re-export async logging macros for external use (removed due to macro conflicts)
 
 // Declare audio module
-pub mod analytics;
 pub mod api;
 pub mod assistant;
 pub mod audio;
@@ -335,8 +334,6 @@ async fn is_audio_level_monitoring() -> bool {
     audio::simple_level_monitor::is_monitoring()
 }
 
-// Analytics commands are now handled by analytics::commands module
-
 // Whisper commands are now handled by whisper_engine::commands module
 
 #[tauri::command]
@@ -618,31 +615,6 @@ pub fn run() {
             get_transcription_status,
             read_audio_file,
             save_transcript,
-            analytics::commands::init_analytics,
-            analytics::commands::disable_analytics,
-            analytics::commands::track_event,
-            analytics::commands::identify_user,
-            analytics::commands::track_meeting_started,
-            analytics::commands::track_recording_started,
-            analytics::commands::track_recording_stopped,
-            analytics::commands::track_meeting_deleted,
-            analytics::commands::track_settings_changed,
-            analytics::commands::track_feature_used,
-            analytics::commands::is_analytics_enabled,
-            analytics::commands::start_analytics_session,
-            analytics::commands::end_analytics_session,
-            analytics::commands::track_daily_active_user,
-            analytics::commands::track_user_first_launch,
-            analytics::commands::is_analytics_session_active,
-            analytics::commands::track_summary_generation_started,
-            analytics::commands::track_summary_generation_completed,
-            analytics::commands::track_summary_regenerated,
-            analytics::commands::track_model_changed,
-            analytics::commands::track_custom_prompt_used,
-            analytics::commands::track_meeting_ended,
-            analytics::commands::track_analytics_enabled,
-            analytics::commands::track_analytics_disabled,
-            analytics::commands::track_analytics_transparency_viewed,
             whisper_engine::commands::whisper_init,
             whisper_engine::commands::whisper_get_available_models,
             whisper_engine::commands::whisper_load_model,
@@ -707,7 +679,9 @@ pub fn run() {
             assistant::commands::api_get_assistant_settings,
             assistant::commands::api_save_assistant_settings,
             assistant::commands::api_get_meeting_suggestions,
-            assistant::commands::api_save_meeting_suggestions,
+            assistant::commands::api_save_meeting_assistant,
+            assistant::commands::api_get_meeting_chat,
+            assistant::commands::api_ask_meeting_assistant,
             assistant::commands::api_import_assistant_snapshot,
             // Playback device detection (Bluetooth warning)
             audio::recording_commands::get_active_audio_output,
@@ -731,7 +705,7 @@ pub fn run() {
             api::api_save_profile,
             api::api_update_profile,
             api::api_get_model_config,
-            api::api_save_summary_model,
+            api::api_save_ai_model,
             api::api_get_api_key,
             api::api_save_api_key,
             api::api_delete_api_key,
@@ -758,17 +732,10 @@ pub fn run() {
             // Summary commands
             summary::commands::api_process_transcript,
             summary::commands::api_get_summary,
-            summary::commands::api_save_meeting_summary,
-            summary::commands::api_get_meeting_summary_language,
-            summary::commands::api_save_meeting_summary_language,
             summary::commands::api_get_meeting_detected_summary_language,
             summary::commands::api_save_meeting_detected_summary_language,
             summary::commands::api_detect_transcript_summary_language,
             summary::commands::api_cancel_summary,
-            // Template commands
-            summary::template_commands::api_list_templates,
-            summary::template_commands::api_get_template_details,
-            summary::template_commands::api_validate_template,
             // Built-in AI commands
             summary::summary_engine::commands::builtin_ai_list_models,
             summary::summary_engine::commands::builtin_ai_get_model_info,
