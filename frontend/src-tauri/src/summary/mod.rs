@@ -38,7 +38,6 @@ pub(crate) mod metadata;
 pub mod processor;
 pub mod service;
 pub mod summary_engine;
-pub mod templates;
 
 // Re-export Tauri commands (with their generated __cmd__ variants)
 pub use commands::{

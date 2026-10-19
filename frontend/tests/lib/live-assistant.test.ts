@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  appendPinnedSection,
   buildPinnedPromptSection,
   contextPercent,
   describeAge,
@@ -73,9 +72,6 @@ describe('live assistant helpers', () => {
       item('s3', { pinned: true, kind: 'tip', at_seconds: 3, text: 'Confirm Friday' }),
     ]);
     expect(section).toBe('Pinned during the call by the user (give these extra attention):\n- [01:05] question: Who owns the migration?\n- [00:03] tip: Confirm Friday');
-    expect(appendPinnedSection('', section)).toBe(section);
-    expect(appendPinnedSection('Focus on risks', section)).toBe(`Focus on risks\n\n${section}`);
-    expect(appendPinnedSection('Focus on risks', '')).toBe('Focus on risks');
   });
 
   test('context percent rounds and survives an unknown limit', () => {

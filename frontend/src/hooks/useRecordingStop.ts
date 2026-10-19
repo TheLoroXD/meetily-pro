@@ -324,9 +324,9 @@ export function useRecordingStop(
             duration: 10000,
           });
 
-          // Auto-navigate after a short delay with source parameter
+          // Auto-navigate after a short delay
           setTimeout(() => {
-            router.push(`/meeting-details?id=${meetingId}&source=recording`);
+            router.push(`/meeting-details?id=${meetingId}`);
             clearTranscripts()
 
             // Reset to IDLE after navigation

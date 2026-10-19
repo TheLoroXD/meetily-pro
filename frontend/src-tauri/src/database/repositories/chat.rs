@@ -51,6 +51,30 @@ impl MeetingChatRepository {
         transaction.commit().await
     }
 
+    pub async fn has_recap(pool: &SqlitePool, meeting_id: &str) -> Result<bool, sqlx::Error> {
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM meeting_chat_messages WHERE meeting_id = ? AND role = ?)")
+            .bind(meeting_id)
+            .bind(ChatRole::Recap.as_str())
+            .fetch_one(pool)
+            .await
+    }
+
+    pub async fn append_recap_once(pool: &SqlitePool, meeting_id: &str, text: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO meeting_chat_messages (meeting_id, position, role, text, error, created_at) SELECT * FROM (SELECT ?, COALESCE(MAX(position), 0) + 1, ?, ?, 0, ? FROM meeting_chat_messages WHERE meeting_id = ?) WHERE NOT EXISTS (SELECT 1 FROM meeting_chat_messages WHERE meeting_id = ? AND role = ?)",
+        )
+        .bind(meeting_id)
+        .bind(ChatRole::Recap.as_str())
+        .bind(text)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .bind(meeting_id)
+        .bind(meeting_id)
+        .bind(ChatRole::Recap.as_str())
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn get_for_meeting(
         pool: &SqlitePool,
         meeting_id: &str,
@@ -116,6 +140,19 @@ mod tests {
                 ("c4", ChatRole::Assistant, "Provider returned 401", true),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn the_meeting_recap_follows_the_chat_once() {
+        let pool = pool().await;
+        MeetingChatRepository::append(&pool, "m1", &[message(ChatRole::User, "Who owns it?", false)]).await.unwrap();
+        assert!(!MeetingChatRepository::has_recap(&pool, "m1").await.unwrap());
+        MeetingChatRepository::append_recap_once(&pool, "m1", "Recap").await.unwrap();
+        assert!(MeetingChatRepository::has_recap(&pool, "m1").await.unwrap());
+        MeetingChatRepository::append_recap_once(&pool, "m1", "Recap again").await.unwrap();
+        let chat = MeetingChatRepository::get_for_meeting(&pool, "m1").await.unwrap();
+        let roles: Vec<(ChatRole, &str)> = chat.iter().map(|m| (m.role, m.text.as_str())).collect();
+        assert_eq!(roles, vec![(ChatRole::User, "Who owns it?"), (ChatRole::Recap, "Recap")]);
     }
 
     #[tokio::test]

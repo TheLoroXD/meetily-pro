@@ -161,6 +161,7 @@ pub enum ChatRole {
     User,
     Assistant,
     Summary,
+    Recap,
 }
 
 impl ChatRole {
@@ -169,6 +170,7 @@ impl ChatRole {
             Self::User => "user",
             Self::Assistant => "assistant",
             Self::Summary => "summary",
+            Self::Recap => "recap",
         }
     }
 
@@ -176,6 +178,7 @@ impl ChatRole {
         match value {
             "user" => Self::User,
             "summary" => Self::Summary,
+            "recap" => Self::Recap,
             _ => Self::Assistant,
         }
     }
@@ -308,7 +311,7 @@ pub fn format_chat(messages: &[ChatMessage]) -> String {
         .map(|message| {
             let speaker = match message.role {
                 ChatRole::User => "User",
-                ChatRole::Assistant => "Assistant",
+                ChatRole::Assistant | ChatRole::Recap => "Assistant",
                 ChatRole::Summary => "Summary of the earlier chat",
             };
             format!("{}: {}\n", speaker, message.text.trim())
@@ -799,7 +802,7 @@ mod tests {
 
     #[test]
     fn chat_roles_round_trip_through_storage() {
-        for role in [ChatRole::User, ChatRole::Assistant, ChatRole::Summary] {
+        for role in [ChatRole::User, ChatRole::Assistant, ChatRole::Summary, ChatRole::Recap] {
             assert_eq!(ChatRole::parse(role.as_str()), role);
         }
         assert_eq!(ChatRole::parse("other"), ChatRole::Assistant);

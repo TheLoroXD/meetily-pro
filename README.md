@@ -61,7 +61,7 @@ Live transcription on device (Whisper with Metal/CUDA/Vulkan/ROCm, or Parakeet o
 
 Live assistant beside the transcript: questions and tips cited to transcript moments, plus a chat about the call so far. Design: [docs/LIVE_ASSISTANT_DESIGN.md](docs/LIVE_ASSISTANT_DESIGN.md).
 
-When a call ends, its summary appears above the assistant chat, and the chat stays open for follow-up questions about the meeting.
+When a call ends, the assistant posts a short recap into the meeting chat, and the chat stays open for follow-up questions about the meeting.
 
 <p align="center"><img src="docs/summary.png" width="720" alt="Summary" /></p>
 
@@ -82,8 +82,6 @@ Mic and system audio mixed with ducking and clip protection; everything stored a
 ## Configuration
 
 All settings are in the app. Data lives in the Tauri app data dir (`~/Library/Application Support/com.meetily.ai`, `%APPDATA%\com.meetily.ai`, `~/.local/share/com.meetily.ai`): `meeting_minutes.sqlite`, `models/`, and a recordings folder with one directory per meeting.
-
-Custom summary template: a `standard_meeting.json` in `Meetily/templates/` under the user data dir overrides the bundled one. Schema: [templates/README.md](frontend/src-tauri/templates/README.md).
 
 ## Build from source
 

@@ -43,6 +43,7 @@ const invoke = mock(async (command: string, args?: Record<string, unknown>): Pro
   if (command === 'api_get_meeting_transcripts') return readTranscripts(args!.meetingId as string);
   if (command === 'api_process_transcript') return { process_id: 'attempt-b' };
   if (command === 'api_cancel_summary') return { cancelled: true };
+  if (command === 'get_ollama_models') return [{ name: 'test' }];
   throw new Error(`Unexpected command: ${command}`);
 });
 mock.module('@tauri-apps/api/core', () => ({ ...originalCore, invoke }));
@@ -128,10 +129,10 @@ describe('meeting route transcript refresh', () => {
     expect(mounts).toBe(2);
   });
 
-  test('completed regeneration survives refresh without reviving the original pending attempt', async () => {
+  test('a completed new attempt survives refresh without reviving the original pending attempt', async () => {
     await show();
     await complete('Summary A', 'attempt-a');
-    await act(async () => { await summaryState.handleRegenerateSummary(); });
+    await act(async () => { await summaryState.handleGenerateSummary(); });
     await complete('Summary B', 'attempt-b');
     expect(text()).toContain('Summary B');
     const finishRefresh = deferMetadata();
@@ -147,20 +148,20 @@ describe('meeting route transcript refresh', () => {
     expect(mounts).toBe(1);
   });
 
-  test('refresh during regeneration keeps the current attempt and its Stop token', async () => {
+  test('refresh during a new attempt keeps polling that attempt', async () => {
     await show();
     await complete('Summary A', 'attempt-a');
-    await act(async () => { await summaryState.handleRegenerateSummary(); });
+    await act(async () => { await summaryState.handleGenerateSummary(); });
     const currentTimer = [...timers.keys()][0];
     const finishRefresh = deferMetadata();
     await act(async () => { void refresh(); });
     expect([...timers.keys()]).toEqual([currentTimer]);
-    expect(summaryState.summaryStatus).toBe('regenerating');
+    expect(summaryState.summaryStatus).toBe('processing');
     await finishRefresh();
     expect([...timers.keys()]).toEqual([currentTimer]);
-    expect(summaryState.summaryStatus).toBe('regenerating');
-    await act(async () => { await summaryState.handleStopGeneration(); });
-    expect(invoke.mock.calls.find(([command]) => command === 'api_cancel_summary')?.[1]?.processId).toBe('attempt-b');
+    expect(summaryState.summaryStatus).toBe('processing');
+    await complete('Summary B', 'attempt-b');
+    expect(summaryState.summaryStatus).toBe('completed');
     expect(timers.size).toBe(0);
   });
 });

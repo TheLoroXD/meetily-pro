@@ -72,5 +72,7 @@ export function useMeetingChat(meetingId: string) {
     await run(() => assistantService.compactMeetingChat(meetingId), 'Could not compact the chat');
   }, [meetingId, run]);
 
-  return { messages, context, answering: asking || answeringElsewhere, ask, compact };
+  const reload = useCallback(() => load(meetingId), [load, meetingId]);
+
+  return { messages, context, answering: asking || answeringElsewhere, ask, compact, reload };
 }

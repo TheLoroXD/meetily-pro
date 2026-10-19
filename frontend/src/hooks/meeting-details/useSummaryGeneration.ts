@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import {
-  CancelSummaryResponse,
   MeetingSummary,
   ProcessTranscriptResponse,
   SummaryProcessResponse,
@@ -16,16 +15,15 @@ import {
   readCachedDetectedSummaryLanguage,
 } from '@/lib/summary-language-preferences';
 import { parseSummaryContent, readSummaryMetadata } from '@/lib/summary-content';
-import { appendPinnedSection, buildPinnedPromptSection } from '@/lib/live-assistant';
+import { buildPinnedPromptSection } from '@/lib/live-assistant';
 import { assistantService } from '@/services/assistantService';
 
-async function withPinnedSuggestions(meetingId: string, customPrompt: string): Promise<string> {
+async function pinnedSuggestionsPrompt(meetingId: string): Promise<string> {
   try {
-    const suggestions = await assistantService.getMeetingSuggestions(meetingId);
-    return appendPinnedSection(customPrompt, buildPinnedPromptSection(suggestions));
+    return buildPinnedPromptSection(await assistantService.getMeetingSuggestions(meetingId));
   } catch (error) {
     console.warn('Failed to load pinned suggestions for summary:', error);
-    return customPrompt;
+    return '';
   }
 }
 
@@ -54,7 +52,7 @@ async function resolveSummaryLanguage(
   }
 }
 
-export type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
+export type SummaryStatus = 'idle' | 'processing' | 'completed' | 'error';
 
 function restoredSummaryStatus(response?: SummaryProcessResponse | null): SummaryStatus {
   if (!response) return 'idle';
@@ -103,26 +101,18 @@ export function useSummaryGeneration({
   const activeProcessIdRef = useRef<string | null>(null);
   const { startSummaryPolling, stopSummaryPolling } = useSidebar();
 
-  const failGeneration = useCallback((
-    generationId: number,
-    isRegeneration: boolean,
-    message: string,
-  ) => {
+  const failGeneration = useCallback((generationId: number, message: string) => {
     if (!mountedRef.current || visibleMeetingIdRef.current !== meeting.id || generationId !== generationIdRef.current) {
       return;
     }
     activeProcessIdRef.current = null;
     setSummaryError(message);
     setSummaryStatus('error');
-    toast.error(`Failed to ${isRegeneration ? 'regenerate' : 'generate'} summary`, {
-      description: message,
-    });
   }, [meeting.id]);
 
   const handlePollingResult = useCallback(async (
     pollingResult: SummaryProcessResponse,
     generationId: number,
-    isRegeneration: boolean,
   ) => {
     if (!mountedRef.current || visibleMeetingIdRef.current !== meeting.id || generationId !== generationIdRef.current) {
       return;
@@ -135,7 +125,7 @@ export function useSummaryGeneration({
         });
       } catch (error) {
         console.error('Failed to reload summary after cancellation:', error);
-        failGeneration(generationId, isRegeneration,
+        failGeneration(generationId,
           'Summary generation was cancelled, but the saved summary could not be reloaded. Please reopen this meeting.');
         return;
       }
@@ -151,43 +141,15 @@ export function useSummaryGeneration({
     }
 
     if (pollingResult.status === 'error' || pollingResult.status === 'failed') {
-      const errorMessage = pollingResult.error
-        || `Summary ${isRegeneration ? 'regeneration' : 'generation'} failed`;
-      if (isRegeneration) {
-        let existing: SummaryProcessResponse;
-        try {
-          existing = await invokeTauri<SummaryProcessResponse>('api_get_summary', {
-            meetingId: meeting.id,
-          });
-        } catch (error) {
-          console.error('Failed to reload previous summary after generation failure:', error);
-          failGeneration(generationId, isRegeneration,
-            `${errorMessage}. The saved summary could not be reloaded. Please reopen this meeting.`);
-          return;
-        }
-        if (!mountedRef.current || visibleMeetingIdRef.current !== meeting.id || generationId !== generationIdRef.current) {
-          return;
-        }
-        const restoredSummary = parseSummaryContent(existing.data);
-        if (restoredSummary) {
-          setAiSummary(restoredSummary);
-          setSummaryStatus('completed');
-          setSummaryError(null);
-          toast.error('Failed to regenerate summary', {
-            description: `${errorMessage}. Your previous summary has been restored.`,
-          });
-          activeProcessIdRef.current = null;
-          return;
-        }
-      }
-      failGeneration(generationId, isRegeneration, errorMessage);
+      const errorMessage = pollingResult.error || 'Summary generation failed';
+      failGeneration(generationId, errorMessage);
       return;
     }
 
     if (pollingResult.status === 'completed') {
       const summary = parseSummaryContent(pollingResult.data);
       if (!summary) {
-        failGeneration(generationId, isRegeneration,
+        failGeneration(generationId,
           'Summary generation completed without visible content. Please retry.');
         return;
       }
@@ -203,13 +165,6 @@ export function useSummaryGeneration({
       if (metadata.normalizationFallback) {
         toast.warning('Summary generated with fallback', {
           description: 'English normalization failed, so the original sanitized summary was kept.',
-        });
-      } else {
-        toast.success('Summary generated successfully!', {
-          description: metadata.reasoningStripped
-            ? 'Your meeting summary is ready. Model reasoning was filtered out of the notes.'
-            : 'Your meeting summary is ready',
-          duration: 4000,
         });
       }
       if (meetingName && onMeetingUpdated) {
@@ -243,43 +198,30 @@ export function useSummaryGeneration({
 
     const generationId = ++generationIdRef.current;
     activeProcessIdRef.current = initialSummary.start;
-    const isRegeneration = !!parseSummaryContent(initialSummary.data);
     startSummaryPolling(meeting.id, initialSummary.start, result =>
-      pollingResultRef.current(result, generationId, isRegeneration));
+      pollingResultRef.current(result, generationId));
   }, [initialSummary, meeting.id, startSummaryPolling]);
 
   const processSummary = useCallback(async ({
     transcriptText,
     transcriptTexts,
-    customPrompt = '',
-    isRegeneration = false,
   }: {
     transcriptText: string;
-    transcriptTexts?: string[];
-    customPrompt?: string;
-    isRegeneration?: boolean;
+    transcriptTexts: string[];
   }) => {
     const generationId = ++generationIdRef.current;
     activeProcessIdRef.current = null;
-    setSummaryStatus(isRegeneration ? 'regenerating' : 'processing');
+    setSummaryStatus('processing');
     setSummaryError(null);
 
     try {
       if (!transcriptText.trim()) {
-        failGeneration(generationId, isRegeneration, 'No transcript text available. Please add some text first.');
+        failGeneration(generationId, 'No transcript text available. Please add some text first.');
         return;
       }
 
-      toast.info(`${isRegeneration ? 'Regenerating' : 'Generating'} summary...`, {
-        description: `Using ${modelConfig.provider}/${modelConfig.model}`,
-        duration: 3000,
-      });
-
-      const summaryLanguage = await resolveSummaryLanguage(
-        meeting.id,
-        transcriptTexts?.length ? transcriptTexts : [transcriptText],
-      );
-      const promptWithPinned = await withPinnedSuggestions(meeting.id, customPrompt);
+      const summaryLanguage = await resolveSummaryLanguage(meeting.id, transcriptTexts);
+      const pinnedPrompt = await pinnedSuggestionsPrompt(meeting.id);
       if (!mountedRef.current || visibleMeetingIdRef.current !== meeting.id || generationId !== generationIdRef.current) {
         return;
       }
@@ -291,7 +233,7 @@ export function useSummaryGeneration({
         meetingId: meeting.id,
         chunkSize: 40000,
         overlap: 1000,
-        customPrompt: promptWithPinned,
+        customPrompt: pinnedPrompt,
         summaryLanguage,
       });
       const processId = result.process_id;
@@ -303,9 +245,9 @@ export function useSummaryGeneration({
       activeProcessIdRef.current = processId;
 
       startSummaryPolling(meeting.id, processId, result =>
-        pollingResultRef.current(result, generationId, isRegeneration));
+        pollingResultRef.current(result, generationId));
     } catch (error) {
-      failGeneration(generationId, isRegeneration, error instanceof Error ? error.message : 'Summary generation failed.');
+      failGeneration(generationId, error instanceof Error ? error.message : 'Summary generation failed.');
     }
   }, [
     failGeneration,
@@ -372,10 +314,9 @@ export function useSummaryGeneration({
   const showPreflightError = useCallback((message: string) => {
     setSummaryError(message);
     setSummaryStatus('error');
-    toast.error(message);
   }, []);
 
-  const handleGenerateSummary = useCallback(async (customPrompt: string = '') => {
+  const handleGenerateSummary = useCallback(async () => {
     if (isModelConfigLoading) {
       toast.info('Loading model configuration, please wait...');
       return;
@@ -416,10 +357,7 @@ export function useSummaryGeneration({
       return;
     }
 
-    await processSummary({
-      ...buildSummaryTranscriptPayload(allTranscripts),
-      customPrompt,
-    });
+    await processSummary(buildSummaryTranscriptPayload(allTranscripts));
   }, [
     buildSummaryTranscriptPayload,
     fetchAllTranscripts,
@@ -430,80 +368,9 @@ export function useSummaryGeneration({
     showPreflightError,
   ]);
 
-  // Public API: Regenerate summary from the current saved transcript
-  const handleRegenerateSummary = useCallback(async (customPrompt: string = '') => {
-    const allTranscripts = await fetchAllTranscripts(meeting.id);
-
-    if (!allTranscripts.length) {
-      console.error('No transcripts available for regeneration');
-      toast.error('No transcripts available for summary regeneration');
-      return;
-    }
-
-    await processSummary({
-      ...buildSummaryTranscriptPayload(allTranscripts),
-      customPrompt,
-      isRegeneration: true
-    });
-  }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary]);
-
-  // Public API: Stop ongoing summary generation
-  const handleStopGeneration = useCallback(async () => {
-    const generationId = generationIdRef.current;
-    const processId = activeProcessIdRef.current;
-    if (!processId) {
-      generationIdRef.current += 1;
-      activeProcessIdRef.current = null;
-      setSummaryStatus('idle');
-      setSummaryError(null);
-      toast.info('Summary generation stopped', {
-        description: 'You can generate a new summary anytime',
-        duration: 3000,
-      });
-      return;
-    }
-
-    try {
-      const result = await invokeTauri<CancelSummaryResponse>('api_cancel_summary', {
-        meetingId: meeting.id,
-        processId,
-      });
-      if (!mountedRef.current || visibleMeetingIdRef.current !== meeting.id || generationId !== generationIdRef.current) {
-        return;
-      }
-      if (result.cancelled) {
-        generationIdRef.current += 1;
-        activeProcessIdRef.current = null;
-        stopSummaryPolling(meeting.id, processId);
-        setSummaryStatus('idle');
-        setSummaryError(null);
-        toast.info('Summary generation stopped', {
-          description: 'You can generate a new summary anytime',
-          duration: 3000,
-        });
-      } else if (activeProcessIdRef.current === processId) {
-        toast.info('Summary is already finishing', {
-          description: 'Waiting for the latest result.',
-        });
-      }
-    } catch (error) {
-      console.error('Failed to cancel summary generation:', error);
-      if (
-        generationId === generationIdRef.current
-        && activeProcessIdRef.current === processId
-      ) {
-        toast.error('Failed to stop summary generation', {
-          description: 'Generation is still running; waiting for its latest status.',
-        });
-      }
-    }
-  }, [meeting.id, stopSummaryPolling]);
-
   return {
     summaryStatus,
     summaryError,
     handleGenerateSummary,
-    handleRegenerateSummary,
-    handleStopGeneration,
   };
 }

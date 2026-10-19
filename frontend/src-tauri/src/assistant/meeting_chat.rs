@@ -51,6 +51,9 @@ fn message(role: ChatRole, text: String, error: bool) -> ChatMessage {
 
 pub async fn load<R: Runtime>(app: &AppHandle<R>, meeting_id: &str) -> Result<MeetingChat, String> {
     let answering = is_answering(meeting_id);
+    if !answering {
+        add_recap(app, meeting_id).await?;
+    }
     let budget = match service::resolve_request(app).await {
         Ok(plan) => Some(budget(&plan).await),
         Err(_) => None,
@@ -140,6 +143,28 @@ async fn budget(plan: &RequestPlan) -> usize {
     }
 }
 
+async fn add_recap<R: Runtime>(app: &AppHandle<R>, meeting_id: &str) -> Result<(), String> {
+    let pool = service::db_pool(app)?;
+    if MeetingChatRepository::has_recap(&pool, meeting_id).await.map_err(|e| e.to_string())? {
+        return Ok(());
+    }
+    let summary = stored_summary(&pool, meeting_id).await?;
+    if summary.trim().is_empty() {
+        return Ok(());
+    }
+    MeetingChatRepository::append_recap_once(&pool, meeting_id, summary.trim())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+async fn stored_summary(pool: &sqlx::SqlitePool, meeting_id: &str) -> Result<String, String> {
+    Ok(SummaryProcessesRepository::get_summary_data(pool, meeting_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .map(|process| summary_markdown(process.result))
+        .unwrap_or_default())
+}
+
 fn summary_markdown(result: Option<String>) -> String {
     result
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
@@ -176,11 +201,7 @@ async fn answer<R: Runtime>(app: &AppHandle<R>, meeting_id: &str, plan: RequestP
     if segments.is_empty() {
         return Err("This meeting has no transcript yet".to_string());
     }
-    let summary = SummaryProcessesRepository::get_summary_data(&pool, meeting_id)
-        .await
-        .map_err(|e| e.to_string())?
-        .map(|process| summary_markdown(process.result))
-        .unwrap_or_default();
+    let summary = stored_summary(&pool, meeting_id).await?;
     let chat = MeetingChatRepository::get_for_meeting(&pool, meeting_id)
         .await
         .map_err(|e| e.to_string())?;

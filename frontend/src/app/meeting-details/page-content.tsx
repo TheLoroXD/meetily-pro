@@ -1,11 +1,10 @@
 "use client";
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { MeetingSummary, SummaryProcessResponse } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { MeetingAssistantPanel } from '@/components/MeetingDetails/MeetingAssistantPanel';
-import { SummaryBubble } from '@/components/MeetingDetails/SummaryBubble';
 import { MeetingDetailsSplitView, type MeetingDetailsTab } from '@/components/MeetingDetails/MeetingDetailsSplitView';
 
 // Custom hooks
@@ -14,14 +13,11 @@ import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGenerati
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
-import { summaryToMarkdown } from '@/lib/summary-content';
 
 export default function PageContent({
   meeting,
   summaryData,
   initialSummary,
-  shouldAutoGenerate = false,
-  onAutoGenerateComplete,
   onMeetingUpdated,
   onRefetchTranscripts,
   // Pagination props for efficient transcript loading
@@ -35,8 +31,6 @@ export default function PageContent({
   meeting: any;
   summaryData: MeetingSummary | null;
   initialSummary: SummaryProcessResponse | null;
-  shouldAutoGenerate?: boolean;
-  onAutoGenerateComplete?: () => void;
   onMeetingUpdated?: () => Promise<void>;
   onRefetchTranscripts?: () => Promise<void>;
   // Pagination props
@@ -54,7 +48,6 @@ export default function PageContent({
   });
 
   // State
-  const [customPrompt, setCustomPrompt] = useState<string>('');
   const isRecording = false;
   const [activeTab, setActiveTab] = useState<MeetingDetailsTab>('transcript');
 
@@ -82,13 +75,12 @@ export default function PageContent({
   });
 
   const hasTranscript = (totalCount ?? meetingData.transcripts.length) > 0;
-  const summaryMarkdown = useMemo(() => summaryToMarkdown(meetingData.aiSummary), [meetingData.aiSummary]);
+  const hasModel = !!modelConfig.model;
 
   const copyOperations = useCopyOperations({
     meeting,
     transcripts: meetingData.transcripts,
     meetingTitle: meetingData.meetingTitle,
-    summaryMarkdown,
   });
 
   const meetingOperations = useMeetingOperations({
@@ -106,33 +98,21 @@ export default function PageContent({
     }
   }, [meeting.id, meetingData.aiSummary, summaryGeneration.summaryStatus]);
 
-  // Auto-generate only after the model configuration has settled.
+  const { summaryStatus, handleGenerateSummary } = summaryGeneration;
   useEffect(() => {
     if (
-      !shouldAutoGenerate
-      || summaryGeneration.summaryStatus !== 'idle'
-      || isModelConfigLoading
-      || meetingData.transcripts.length === 0
+      isModelConfigLoading
+      || !hasModel
+      || !hasTranscript
+      || meetingData.aiSummary
+      || summaryStatus !== 'idle'
       || autoGenerationStartedMeetingIdRef.current === meeting.id
     ) {
       return;
     }
-
     autoGenerationStartedMeetingIdRef.current = meeting.id;
-    console.log(`🤖 Auto-generating summary with ${modelConfig.provider}/${modelConfig.model}...`);
-    onAutoGenerateComplete?.();
-    void summaryGeneration.handleGenerateSummary('');
-  }, [
-    shouldAutoGenerate,
-    meeting.id,
-    meetingData.transcripts.length,
-    isModelConfigLoading,
-    modelConfig.provider,
-    modelConfig.model,
-    summaryGeneration.handleGenerateSummary,
-    summaryGeneration.summaryStatus,
-    onAutoGenerateComplete,
-  ]);
+    void handleGenerateSummary();
+  }, [isModelConfigLoading, hasModel, hasTranscript, meeting.id, meetingData.aiSummary, summaryStatus, handleGenerateSummary]);
 
   return (
     <motion.div
@@ -151,8 +131,6 @@ export default function PageContent({
           transcript={
             <TranscriptPanel
               transcripts={meetingData.transcripts}
-              customPrompt={customPrompt}
-              onPromptChange={setCustomPrompt}
               onCopyTranscript={copyOperations.handleCopyTranscript}
               onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
               isRecording={isRecording}
@@ -173,19 +151,10 @@ export default function PageContent({
             <MeetingAssistantPanel
               meetingId={meeting.id}
               hasTranscript={hasTranscript}
-              summary={
-                <SummaryBubble
-                  markdown={summaryMarkdown}
-                  status={summaryGeneration.summaryStatus}
-                  error={summaryGeneration.summaryError}
-                  hasTranscript={hasTranscript}
-                  hasModel={isModelConfigLoading || !!modelConfig.model}
-                  onGenerate={() => summaryGeneration.handleGenerateSummary(customPrompt)}
-                  onRegenerate={() => summaryGeneration.handleRegenerateSummary(customPrompt)}
-                  onStop={summaryGeneration.handleStopGeneration}
-                  onCopy={copyOperations.handleCopySummary}
-                />
-              }
+              summaryStatus={summaryGeneration.summaryStatus}
+              summaryError={summaryGeneration.summaryError}
+              hasModel={isModelConfigLoading || hasModel}
+              onRetrySummary={summaryGeneration.handleGenerateSummary}
             />
           }
         />
