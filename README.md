@@ -32,6 +32,13 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 
 ## What's new
 
+### v1.6.0
+
+- When a meeting ends, the assistant posts a short summary right into the chat; just keep asking if you want more detail.
+- Summaries are shorter: what the meeting was about, what was decided and what happens next.
+- The chat memory gauge now sits next to the message box and turns into a Compact link when the chat gets long.
+- Copy any assistant reply with one click.
+
 ### v1.5.0
 
 - Paste long texts into the assistant chat; a gauge shows how full its memory is, and Compact keeps a short summary so you can keep going.
@@ -44,14 +51,6 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 - Use your Claude Code or Codex sign-in as the AI model, no API key needed.
 - The live assistant now brings useful facts and tips, not only questions.
 - Change the transcription language during a call (Whisper).
-
-### v1.3.0
-
-- Meetily is now Meetily Pro, with a new icon.
-- When a call ends, its summary appears above the assistant chat, and you can keep asking about the meeting, even days later.
-- One AI model writes summaries and answers your questions.
-- Follows your system light or dark mode.
-- Simpler settings: General, Recordings and Models. Usage analytics are gone.
 
 ## Features
 
