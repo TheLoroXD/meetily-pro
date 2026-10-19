@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use log::{info, warn};
+use log::{debug, info, warn};
 use serde::Serialize;
 use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
@@ -32,12 +32,12 @@ const FLOOR_CLOUD: Duration = Duration::from_secs(45);
 const FLOOR_BUILTIN: Duration = Duration::from_secs(90);
 const MANUAL_DEBOUNCE: Duration = Duration::from_secs(5);
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
-const OUTPUT_TOKENS: u32 = 400;
+const OUTPUT_TOKENS: u32 = 1024;
 const BUILTIN_INPUT_TOKENS: usize = 2000;
 const CLOUD_INPUT_TOKENS: usize = 8000;
 const OLLAMA_HEADROOM_TOKENS: usize = 800;
 const OLLAMA_FALLBACK_CONTEXT: usize = 4096;
-const MAX_ERROR_CHARS: usize = 160;
+const MAX_ERROR_CHARS: usize = 240;
 const MAX_DISMISSED_IN_PROMPT: usize = 20;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const CHAT_OUTPUT_TOKENS: u32 = 500;
@@ -48,7 +48,7 @@ const SNAPSHOT_FILE: &str = "suggestions.json";
 static HTTP_CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(reqwest::Client::new);
 
 static PROVIDER_STATUS: std::sync::LazyLock<regex::Regex> =
-    std::sync::LazyLock::new(|| regex::Regex::new(r"failed with status (\d{3}[^:]*)").unwrap());
+    std::sync::LazyLock::new(|| regex::Regex::new(r"(?s)failed with status (\d{3}[^:]*):?(.*)").unwrap());
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -206,12 +206,6 @@ impl SessionData {
     fn push_chat(&mut self, role: ChatRole, text: String, error: bool) {
         let id = format!("c{}", self.chat.len() + 1);
         self.chat.push(ChatMessage { id, role, text, error });
-    }
-
-    fn pause_for_consent(&mut self) {
-        self.paused = true;
-        self.pending = false;
-        self.status = AssistantStatus::Paused;
     }
 
     fn fail_setup(&mut self, error: &str) {
@@ -528,11 +522,20 @@ fn language_name(window: &[TranscriptSegment]) -> String {
 }
 
 pub(super) fn short_error(error: &str) -> String {
-    if let Some(captures) = PROVIDER_STATUS.captures(error) {
-        return format!("Provider returned {}", captures[1].trim());
-    }
-    let single_line: String = error.split_whitespace().collect::<Vec<_>>().join(" ");
+    let message = match PROVIDER_STATUS.captures(error) {
+        Some(captures) => match provider_message(&captures[2]) {
+            Some(reason) => format!("Provider returned {}: {}", captures[1].trim(), reason),
+            None => format!("Provider returned {}", captures[1].trim()),
+        },
+        None => error.to_string(),
+    };
+    let single_line: String = message.split_whitespace().collect::<Vec<_>>().join(" ");
     single_line.chars().take(MAX_ERROR_CHARS).collect()
+}
+
+fn provider_message(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
+    value["error"]["message"].as_str().map(str::to_string)
 }
 
 fn persist_snapshot(folder: &Path, data: &SessionData) {
@@ -568,7 +571,6 @@ pub fn read_snapshot(folder: &Path) -> (Vec<Suggestion>, Vec<ChatMessage>) {
 pub(super) struct RequestPlan {
     pub(super) provider_settings: ProviderSettings,
     cloud: bool,
-    consented: bool,
     provider_label: String,
     pub(super) model: String,
 }
@@ -578,8 +580,7 @@ pub(super) async fn resolve_request<R: Runtime>(app: &AppHandle<R>) -> Result<Re
     let (provider_label, model) = resolve_target(&pool).await?;
     let provider_settings = resolve_provider_settings(&pool, &provider_label).await?;
     let cloud = is_cloud(&provider_settings.provider, provider_settings.ollama_endpoint.as_deref());
-    let consented = !cloud || settings::load(app).has_cloud_consent(&provider_label);
-    Ok(RequestPlan { provider_settings, cloud, consented, provider_label, model })
+    Ok(RequestPlan { provider_settings, cloud, provider_label, model })
 }
 
 async fn resolve_plan<R: Runtime>(app: &AppHandle<R>, data: &Arc<Mutex<SessionData>>) -> Result<RequestPlan, String> {
@@ -667,7 +668,11 @@ async fn run_tick<R: Runtime>(
     let through_seq = window.last().map(|s| s.sequence_id);
     let options = CompletionOptions { json_mode: true, max_tokens: Some(OUTPUT_TOKENS), json_schema: Some(prompt::SUGGESTIONS_SCHEMA) };
     let content = call_model(app, plan, prompt::SYSTEM_PROMPT, &user_prompt, token, options).await?;
-    Ok((prompt::parse_model_output(&content)?, through_seq))
+    let output = prompt::parse_model_output(&content).inspect_err(|_| {
+        warn!("Unreadable assistant output ({} chars)", content.len());
+        debug!("Unreadable assistant output: {}", content.chars().take(300).collect::<String>());
+    })?;
+    Ok((output, through_seq))
 }
 
 pub(super) fn checked_question(question: String) -> Result<String, String> {
@@ -727,9 +732,6 @@ async fn answer_chat<R: Runtime>(
     chat_token: &CancellationToken,
 ) -> Result<String, String> {
     let plan = resolve_plan(app, data).await?;
-    if !plan.consented {
-        return Err(format!("Allow sending the live transcript to {} first", plan.provider_label));
-    }
     let snapshot = live_transcript_snapshot().ok_or_else(|| "No active recording".to_string())?;
     let budget = input_budget(&plan.provider_settings, &plan.model).await;
     let (prefix, chat) = {
@@ -817,10 +819,8 @@ async fn run_loop<R: Runtime>(
     let initial = resolve_plan(&app, &data).await;
     if !token.is_cancelled() {
         let mut guard = lock_data(&data);
-        match initial {
-            Ok(plan) if !plan.consented => guard.pause_for_consent(),
-            Ok(_) => {}
-            Err(error) => guard.fail_setup(&error),
+        if let Err(error) = initial {
+            guard.fail_setup(&error);
         }
         emit_status(&app, &guard, true);
     }
@@ -892,12 +892,6 @@ async fn run_loop<R: Runtime>(
             break;
         }
         let plan = match planned {
-            Ok(plan) if !plan.consented => {
-                let mut guard = lock_data(&data);
-                guard.pause_for_consent();
-                emit_status(&app, &guard, true);
-                continue;
-            }
             Ok(plan) => plan,
             Err(error) => {
                 let mut guard = lock_data(&data);
@@ -1170,6 +1164,13 @@ mod tests {
     fn short_error_hides_provider_response_bodies() {
         let error = "LLM API request failed with status 401 Unauthorized: {\"error\":\"echo of the transcript text\"}";
         assert_eq!(short_error(error), "Provider returned 401 Unauthorized");
+        assert_eq!(short_error("LLM API request failed with status 500 Internal Server Error: echo"), "Provider returned 500 Internal Server Error");
+    }
+
+    #[test]
+    fn short_error_keeps_the_providers_own_reason() {
+        let error = "LLM API request failed with status 404 Not Found: {\"error\":{\"message\":\"Model blocked\\nby guardrail\",\"code\":404}}";
+        assert_eq!(short_error(error), "Provider returned 404 Not Found: Model blocked by guardrail");
     }
 
     #[test]

@@ -47,6 +47,10 @@ export class AssistantService {
     return invoke<Suggestion[]>('api_get_meeting_suggestions', { meetingId });
   }
 
+  async dismissMeetingSuggestion(meetingId: string, id: string): Promise<void> {
+    return invoke('api_dismiss_meeting_suggestion', { meetingId, id });
+  }
+
   async saveMeetingAssistant(meetingId: string): Promise<void> {
     return invoke('api_save_meeting_assistant', { meetingId });
   }

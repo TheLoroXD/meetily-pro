@@ -49,7 +49,7 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 ### v1.2.0
 
 - One Models page in Settings: add your AI services and download models in one place.
-- Pick the voice, summary and assistant models separately, from the ones that work right now.
+- Press Use next to any ready provider to pick its model; one AI model serves summaries and the assistant.
 - Your saved keys, server addresses and downloaded models carry over.
 
 ## Features

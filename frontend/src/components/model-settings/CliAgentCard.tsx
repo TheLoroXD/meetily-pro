@@ -5,9 +5,9 @@ import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { catalogLabel, type CliAgentProvider, type ProviderState } from '@/lib/model-catalog';
 
-const SETUP: Record<CliAgentProvider, { install: string; signIn: string }> = {
-  'claude-code': { install: 'curl -fsSL https://claude.ai/install.sh | bash', signIn: 'claude' },
-  codex: { install: 'npm install -g @openai/codex', signIn: 'codex login' },
+const SETUP: Record<CliAgentProvider, { install: string; signIn: string; note: string }> = {
+  'claude-code': { install: 'curl -fsSL https://claude.ai/install.sh | bash', signIn: 'claude', note: 'It signs in with the same account and settings as claude in your terminal. Your hooks and CLAUDE.md files are skipped.' },
+  codex: { install: 'npm install -g @openai/codex', signIn: 'codex login', note: 'Only the standard codex login sign-in works, not a custom model provider.' },
 };
 
 interface CliAgentCardProps {
@@ -18,7 +18,7 @@ interface CliAgentCardProps {
 
 export function CliAgentCard({ provider, state, onRecheck }: CliAgentCardProps) {
   const label = catalogLabel(provider);
-  const { install, signIn } = SETUP[provider];
+  const { install, signIn, note } = SETUP[provider];
   const ready = state?.status === 'ready';
   const [rechecking, setRechecking] = useState(false);
   const checking = rechecking || !state || state.status === 'loading';
@@ -36,7 +36,7 @@ export function CliAgentCard({ provider, state, onRecheck }: CliAgentCardProps) 
     <div className="space-y-3 text-sm text-gray-700">
       <p>
         Uses the {label} app on this computer with your own sign-in. Calls count against that account, your plan or your API key.
-        It runs with its tools turned off and saves no session files. Only the standard sign-in works, not Bedrock, Vertex or a custom model provider.
+        It runs with its tools turned off and saves no session files. {note}
       </p>
       {!ready && !checking && (
         <ol className="list-decimal space-y-1.5 pl-5 text-xs text-gray-600">

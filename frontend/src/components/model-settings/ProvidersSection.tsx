@@ -6,16 +6,17 @@ import { useConfig } from '@/contexts/ConfigContext';
 import { ModelManager as WhisperModelManager } from '@/components/WhisperModelManager';
 import { ParakeetModelManager } from '@/components/ParakeetModelManager';
 import { BuiltInModelManager } from '@/components/BuiltInModelManager';
-import { CLI_AGENTS, CLOUD_PROVIDERS, catalogLabel, isCliAgent, isOnDevice, type Catalog, type CatalogProvider, type CloudProvider, type ProviderState } from '@/lib/model-catalog';
+import { VOICE_LOCKED_REASON, type ModelSelection } from '@/hooks/useModelSelection';
+import { CLI_AGENTS, CLOUD_PROVIDERS, SPEECH_PROVIDERS, catalogLabel, isCliAgent, isOnDevice, type Catalog, type CatalogProvider, type CloudProvider, type ProviderState, type SpeechProvider } from '@/lib/model-catalog';
 import { CloudKeyCard } from './CloudKeyCard';
 import { OllamaCard } from './OllamaCard';
 import { CustomServerCard } from './CustomServerCard';
 import { CliAgentCard } from './CliAgentCard';
+import { UseModelButton } from './UseModelButton';
 
 type Badge = { text: string; className: string };
 
 const BADGES = {
-  ready: { text: 'Ready', className: 'bg-green-50 text-green-700' },
   missing: { text: 'Not set up', className: 'bg-gray-100 text-gray-600' },
   checking: { text: 'Checking', className: 'bg-gray-100 text-gray-500' },
   unreachable: { text: 'Unreachable', className: 'bg-red-50 text-red-700' },
@@ -25,16 +26,16 @@ function count(models: string[], noun: string): string {
   return `${models.length} ${noun}${models.length === 1 ? '' : 's'}`;
 }
 
-function describe(provider: CatalogProvider, state: ProviderState | undefined, hasKey: boolean): { line: string; badge: Badge } {
+function describe(provider: CatalogProvider, state: ProviderState | undefined, hasKey: boolean): { line: string; badge?: Badge } {
   if (!state || state.status === 'loading') return { line: '', badge: BADGES.checking };
   const onDevice = isOnDevice(provider);
   const cli = isCliAgent(provider);
   if (state.status === 'ready') {
-    if (onDevice) return { line: `${count(state.models, 'model')} downloaded`, badge: BADGES.ready };
-    if (provider === 'ollama') return { line: `Connected - ${count(state.models, 'model')}`, badge: BADGES.ready };
-    if (provider === 'custom-openai') return { line: state.models[0], badge: BADGES.ready };
-    if (cli) return { line: state.detail ? `Signed in - ${state.detail}` : 'Signed in', badge: BADGES.ready };
-    return { line: 'Key saved', badge: BADGES.ready };
+    if (onDevice) return { line: `${count(state.models, 'model')} downloaded` };
+    if (provider === 'ollama') return { line: `Connected - ${count(state.models, 'model')}` };
+    if (provider === 'custom-openai') return { line: state.models[0] };
+    if (cli) return { line: state.detail ? `Signed in - ${state.detail}` : 'Signed in' };
+    return { line: `Key saved - ${count(state.models, 'model')}` };
   }
   if (state.status === 'error') {
     return { line: hasKey ? `Key saved - ${state.reason}` : 'Could not connect', badge: BADGES.unreachable };
@@ -51,24 +52,41 @@ interface ProvidersSectionProps {
   refresh: (only?: CatalogProvider[]) => Promise<void>;
   open: string;
   onOpenChange: (value: string) => void;
-  inUseBy: (provider: string) => string[];
+  selection: ModelSelection;
   onCustomServerSaved: () => void;
 }
 
-export function ProvidersSection({ catalog, refresh, open, onOpenChange, inUseBy, onCustomServerSaved }: ProvidersSectionProps) {
+export function ProvidersSection({ catalog, refresh, open, onOpenChange, selection, onCustomServerSaved }: ProvidersSectionProps) {
   const { providerApiKeys } = useConfig();
+  const { ai, voice, chooseAiModel, chooseVoiceModel, voiceLocked } = selection;
+
+  const actionFor = (provider: CatalogProvider, state: ProviderState | undefined) => {
+    if (state?.status !== 'ready') return null;
+    const speech = SPEECH_PROVIDERS.includes(provider as SpeechProvider);
+    return (
+      <UseModelButton
+        provider={provider}
+        models={state.models}
+        current={speech ? voice : ai}
+        onChoose={speech ? chooseVoiceModel : chooseAiModel}
+        disabled={speech && voiceLocked}
+        disabledReason={VOICE_LOCKED_REASON}
+      />
+    );
+  };
 
   const row = (provider: CatalogProvider, tag: string | null, body: ReactNode) => {
     const hasKey = !!providerApiKeys[provider as CloudProvider]?.trim();
-    const { line, badge } = describe(provider, catalog[provider], hasKey);
+    const state = catalog[provider];
+    const { line, badge } = describe(provider, state, hasKey);
+    const action = actionFor(provider, state) ?? (badge && <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${badge.className}`}>{badge.text}</span>);
     return (
       <AccordionItem key={provider} value={provider} id={`provider-${provider}`} className="scroll-mt-24">
-        <AccordionTrigger className="py-3 hover:no-underline">
+        <AccordionTrigger className="py-3 hover:no-underline" actions={<div className="flex w-60 shrink-0 justify-end">{action}</div>}>
           <span className="flex min-w-0 flex-1 items-center gap-3">
             <span className="w-28 shrink-0 font-medium text-gray-900">{catalogLabel(provider)}</span>
             {tag && <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-normal text-gray-600">{tag}</span>}
             <span className="min-w-0 flex-1 truncate text-xs font-normal text-gray-500" title={line}>{line}</span>
-            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${badge.className}`}>{badge.text}</span>
           </span>
         </AccordionTrigger>
         <AccordionContent className="px-1 pt-1 pb-4">{body}</AccordionContent>
@@ -92,7 +110,7 @@ export function ProvidersSection({ catalog, refresh, open, onOpenChange, inUseBy
         <p className="mb-1 text-xs text-gray-500">Needs a server or internet. Your transcript is sent to the service you pick.</p>
         <Accordion type="single" collapsible value={open} onValueChange={onOpenChange}>
           {row('ollama', null, <OllamaCard state={catalog.ollama} onChanged={() => refresh(['ollama'])} />)}
-          {CLOUD_PROVIDERS.map((provider) => row(provider, null, <CloudKeyCard provider={provider} inUseBy={inUseBy(provider)} />))}
+          {CLOUD_PROVIDERS.map((provider) => row(provider, null, <CloudKeyCard provider={provider} inUseBy={ai.provider === provider ? ['Summaries and the assistant'] : []} />))}
           {row('custom-openai', null, <CustomServerCard onSaved={onCustomServerSaved} />)}
           {CLI_AGENTS.map((provider) => row(provider, null, <CliAgentCard provider={provider} state={catalog[provider]} onRecheck={() => refresh([provider])} />))}
         </Accordion>

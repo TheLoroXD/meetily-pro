@@ -679,6 +679,7 @@ pub fn run() {
             assistant::commands::api_get_assistant_settings,
             assistant::commands::api_save_assistant_settings,
             assistant::commands::api_get_meeting_suggestions,
+            assistant::commands::api_dismiss_meeting_suggestion,
             assistant::commands::api_save_meeting_assistant,
             assistant::commands::api_get_meeting_chat,
             assistant::commands::api_ask_meeting_assistant,

@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useRef, useState, type FormEvent } from 'react';
+import { memo, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,17 +42,20 @@ interface ChatThreadProps {
   messages: ChatMessage[];
   pending: boolean;
   emptyHint: string;
+  lead?: ReactNode;
 }
 
-export function ChatThread({ messages, pending, emptyHint }: ChatThreadProps) {
+export function ChatThread({ messages, pending, emptyHint, lead }: ChatThreadProps) {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (messages.length === 0 && !pending) return;
     endRef.current?.scrollIntoView({ block: 'end' });
   }, [messages.length, pending]);
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
+      {lead}
       {messages.length === 0 && !pending && <p className="text-xs text-gray-500 text-center pt-2 px-2">{emptyHint}</p>}
       {messages.map((message) => <ChatBubble key={message.id} message={message} />)}
       {pending && <div className="w-fit rounded-lg bg-gray-100 text-gray-500 px-3 py-2 text-sm animate-pulse">Thinking...</div>}

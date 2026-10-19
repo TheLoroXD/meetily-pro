@@ -5,7 +5,6 @@ import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { recordingService } from '@/services/recordingService';
-import { showRecordingNotification } from '@/lib/recordingNotification';
 import {
   getProviderCommands,
   hasDownloadingModel,
@@ -166,9 +165,6 @@ export function useRecordingStart(
       setIsRecording(true); // This will also update the sidebar via the useEffect
       clearTranscripts(); // Clear previous transcripts when starting new recording
       setIsMeetingActive(true);
-
-      // Show recording notification if enabled
-      await showRecordingNotification();
     } catch (error) {
       console.error('Failed to start recording:', error);
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -253,9 +249,6 @@ export function useRecordingStart(
             setIsRecording(true);
             clearTranscripts();
             setIsMeetingActive(true);
-
-            // Show recording notification if enabled
-            await showRecordingNotification();
           } catch (error) {
             console.error('Failed to auto-start recording:', error);
             const errorMsg = error instanceof Error ? error.message : String(error);
@@ -347,9 +340,6 @@ export function useRecordingStart(
         setIsRecording(true);
         clearTranscripts();
         setIsMeetingActive(true);
-
-        // Show recording notification if enabled
-        await showRecordingNotification();
       } catch (error) {
         console.error('Failed to start recording from sidebar:', error);
         const errorMsg = error instanceof Error ? error.message : String(error);

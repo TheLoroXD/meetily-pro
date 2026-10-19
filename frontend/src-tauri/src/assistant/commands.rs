@@ -70,6 +70,17 @@ pub async fn api_get_meeting_suggestions(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn api_dismiss_meeting_suggestion(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    id: String,
+) -> Result<(), String> {
+    MeetingSuggestionsRepository::dismiss(state.db_manager.pool(), &meeting_id, &id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[derive(serde::Serialize)]
 pub struct MeetingChat {
     messages: Vec<ChatMessage>,

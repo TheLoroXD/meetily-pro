@@ -44,7 +44,6 @@ export interface MeetingChat {
 
 export interface AssistantSettings {
   enabled: boolean;
-  cloud_consent: Record<string, boolean>;
 }
 
 export const KIND_META: Record<SuggestionKind, { label: string; badge: string; text: string }> = {
@@ -53,30 +52,6 @@ export const KIND_META: Record<SuggestionKind, { label: string; badge: string; t
 };
 
 const STALE_AFTER_MS = 3 * 60 * 1000;
-
-export function hasCloudConsent(settings: AssistantSettings, provider: string): boolean {
-  return settings.cloud_consent[provider] === true;
-}
-
-export function withCloudConsent(settings: AssistantSettings, provider: string): AssistantSettings {
-  return { ...settings, cloud_consent: { ...settings.cloud_consent, [provider]: true } };
-}
-
-export function isLocalEndpoint(endpoint: string | null | undefined): boolean {
-  if (!endpoint) return true;
-  try {
-    const host = new URL(endpoint).hostname.toLowerCase();
-    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1' || host === '0.0.0.0' || host.endsWith('.localhost');
-  } catch {
-    return false;
-  }
-}
-
-export function isCloudProvider(provider: string, ollamaEndpoint?: string | null): boolean {
-  if (provider === 'builtin-ai') return false;
-  if (provider === 'ollama') return !isLocalEndpoint(ollamaEndpoint);
-  return true;
-}
 
 const PANEL_OPEN_KEY = 'assistant_panel_open';
 
@@ -99,6 +74,10 @@ export function writePanelOpen(open: boolean): void {
 function idNumber(id: string): number {
   const parsed = Number.parseInt(id.replace(/^s/, ''), 10);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function suggestionQuestion(item: Suggestion): string {
+  return item.kind === 'tip' ? `Tell me more about this tip and how it applies here: ${item.text}` : item.text;
 }
 
 export function sortSuggestions(items: Suggestion[]): Suggestion[] {

@@ -4,10 +4,9 @@ import {
   buildPinnedPromptSection,
   describeAge,
   formatClock,
-  isCloudProvider,
-  isLocalEndpoint,
   sortSuggestions,
   splitCitations,
+  suggestionQuestion,
   type Suggestion,
 } from '../../src/lib/live-assistant';
 
@@ -35,6 +34,11 @@ describe('live assistant helpers', () => {
     expect(splitCitations('No citations')).toEqual([{ text: 'No citations' }]);
   });
 
+  test('asks about a tip in its own words and passes questions through', () => {
+    expect(suggestionQuestion(item('s1', { text: 'Who owns the rollout?' }))).toBe('Who owns the rollout?');
+    expect(suggestionQuestion(item('s2', { kind: 'tip', text: 'Rollups keep queries fast.' }))).toBe('Tell me more about this tip and how it applies here: Rollups keep queries fast.');
+  });
+
   test('sorts pinned first, then newest, and hides dismissed', () => {
     const ordered = sortSuggestions([
       item('s1'),
@@ -58,17 +62,6 @@ describe('live assistant helpers', () => {
     expect(describeAge('2026-10-12T09:59:58Z', now)).toEqual({ label: 'Updated just now', stale: false });
     expect(describeAge('2026-10-12T09:59:20Z', now)).toEqual({ label: 'Updated 40 s ago', stale: false });
     expect(describeAge('2026-10-12T09:55:00Z', now)).toEqual({ label: 'Updated 5 min ago', stale: true });
-  });
-
-  test('classifies providers as cloud or local', () => {
-    expect(isCloudProvider('builtin-ai')).toBe(false);
-    expect(isCloudProvider('ollama')).toBe(false);
-    expect(isCloudProvider('ollama', 'http://127.0.0.1:11434')).toBe(false);
-    expect(isCloudProvider('ollama', 'http://10.0.0.4:11434')).toBe(true);
-    expect(isCloudProvider('openai')).toBe(true);
-    expect(isCloudProvider('custom-openai')).toBe(true);
-    expect(isLocalEndpoint('nonsense')).toBe(false);
-    expect(isLocalEndpoint(null)).toBe(true);
   });
 
   test('builds the pinned section only from pinned, visible items', () => {
