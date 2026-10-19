@@ -1,7 +1,10 @@
 'use client';
 
 import { memo, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { Send } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Copy, Send } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { COMPACT_FROM_PERCENT, contextPercent, splitCitations, type ChatContext, type ChatMessage } from '@/lib/live-assistant';
@@ -31,6 +34,27 @@ function CitedText({ text }: { text: string }) {
   );
 }
 
+const REMARK_PLUGINS = [remarkGfm];
+
+export function copyText(text: string) {
+  navigator.clipboard?.writeText(text);
+  toast.success('Copied');
+}
+
+function CopyButton({ text }: { text: string }) {
+  return (
+    <button
+      type="button"
+      className="absolute right-1 top-1 rounded p-1 text-gray-400 opacity-0 hover:text-gray-700 focus:opacity-100 group-hover:opacity-100"
+      title="Copy"
+      aria-label="Copy"
+      onClick={() => copyText(text)}
+    >
+      <Copy size={12} />
+    </button>
+  );
+}
+
 const ChatBubble = memo(function ChatBubble({ message }: { message: ChatMessage }) {
   if (message.role === 'user') {
     return (
@@ -47,9 +71,27 @@ const ChatBubble = memo(function ChatBubble({ message }: { message: ChatMessage 
       </details>
     );
   }
+  if (message.role === 'recap') {
+    return (
+      <div className="group relative rounded-lg border border-blue-100 bg-blue-50/70 py-2 pl-3 pr-7 text-sm text-gray-800">
+        <div className="prose prose-sm max-w-none dark:prose-invert prose-headings:mb-1 prose-headings:mt-2 prose-p:my-1 prose-ul:my-1 prose-li:my-0">
+          <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{message.text}</ReactMarkdown>
+        </div>
+        <CopyButton text={message.text} />
+      </div>
+    );
+  }
+  if (message.error) {
+    return (
+      <div className="max-w-[90%] rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 whitespace-pre-wrap break-words">
+        <CitedText text={message.text} />
+      </div>
+    );
+  }
   return (
-    <div className={`max-w-[90%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words ${message.error ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-800'}`}>
+    <div className="group relative w-fit max-w-[90%] rounded-lg bg-gray-100 py-2 pl-3 pr-7 text-sm text-gray-800 whitespace-pre-wrap break-words">
       <CitedText text={message.text} />
+      <CopyButton text={message.text} />
     </div>
   );
 }, (previous, next) => (
@@ -64,9 +106,10 @@ interface ChatThreadProps {
   pending: boolean;
   emptyHint: string;
   lead?: ReactNode;
+  trail?: ReactNode;
 }
 
-export function ChatThread({ messages, pending, emptyHint, lead }: ChatThreadProps) {
+export function ChatThread({ messages, pending, emptyHint, lead, trail }: ChatThreadProps) {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -79,6 +122,7 @@ export function ChatThread({ messages, pending, emptyHint, lead }: ChatThreadPro
       {lead}
       {messages.length === 0 && !pending && <p className="text-xs text-gray-500 text-center pt-2 px-2">{emptyHint}</p>}
       {messages.map((message) => <ChatBubble key={message.id} message={message} />)}
+      {trail}
       {pending && <div className="w-fit rounded-lg bg-gray-100 text-gray-500 px-3 py-2 text-sm animate-pulse">Thinking...</div>}
       <div ref={endRef} />
     </div>
@@ -107,17 +151,25 @@ interface ContextMeterProps {
 
 function ContextMeter({ context, busy, onCompact }: ContextMeterProps) {
   const percent = contextPercent(context);
-  const full = percent > 100;
+  const title = percent > 100
+    ? `Chat memory ${percent}% full: the oldest messages are forgotten. Compact keeps their gist.`
+    : `Chat memory ${percent}% full`;
   return (
-    <div className="flex items-center gap-2 text-[11px] text-gray-500">
-      <span className="flex items-center gap-1.5" title="How much of the chat the assistant keeps in mind. Past 100% it forgets the oldest messages; compact to keep their gist.">
-        <Speedometer percent={percent} />
-        Context {percent}%{full && ', oldest messages forgotten'}
-      </span>
-      {percent > COMPACT_FROM_PERCENT && (
-        <Button type="button" variant="outline" size="sm" className="ml-auto h-6 px-2 text-[11px]" disabled={busy} onClick={onCompact} title="Replace the chat so far with a short summary the assistant keeps">
+    <div className="flex h-9 w-12 shrink-0 flex-col items-center justify-center gap-0.5" title={title}>
+      <span className="sr-only">{title}</span>
+      <Speedometer percent={percent} />
+      {percent >= COMPACT_FROM_PERCENT ? (
+        <button
+          type="button"
+          className="text-[10px] font-medium leading-none text-blue-600 enabled:hover:underline disabled:opacity-50"
+          disabled={busy}
+          onClick={onCompact}
+          title="Replace the chat so far with a short summary the assistant keeps"
+        >
           Compact
-        </Button>
+        </button>
+      ) : (
+        <span className="text-[10px] leading-none text-gray-500">{percent}%</span>
       )}
     </div>
   );
@@ -160,9 +212,9 @@ export function ChatInput({ placeholder, disabled, canSend, onSend, context, onC
   };
 
   return (
-    <form onSubmit={submit} className="p-3 border-t border-gray-200 space-y-2">
-      {context && context.used > 0 && onCompact && <ContextMeter context={context} busy={!canSend} onCompact={onCompact} />}
+    <form onSubmit={submit} className="p-3 border-t border-gray-200">
       <div className="flex items-end gap-2">
+        {context && context.used > 0 && onCompact && <ContextMeter context={context} busy={!canSend} onCompact={onCompact} />}
         <Textarea
           ref={inputRef}
           rows={1}

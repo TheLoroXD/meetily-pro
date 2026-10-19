@@ -77,7 +77,6 @@ export interface BlockNoteBlock {
 export interface SummaryDataResponse {
   markdown?: string;
   summary_json?: BlockNoteBlock[];
-  reasoning_stripped?: boolean;
   normalization_fallback?: boolean;
   // Legacy format fields
   MeetingName?: string;
@@ -99,12 +98,6 @@ export type SummaryProcessStatus =
 export interface ProcessTranscriptResponse {
   message: string;
   process_id: string;
-}
-
-export interface CancelSummaryResponse {
-  cancelled: boolean;
-  message: string;
-  meeting_id: string;
 }
 
 export interface SummaryProcessResponse {

@@ -197,7 +197,7 @@ Data (`api_` prefix):
 - `app/_components/AssistantPanel.tsx`: pane; mounted as a sibling of `TranscriptPanel` in `page.tsx` with one JSX line.
 - `components/model-settings/LiveAssistantSettings.tsx` on the Settings page, Models tab, under the AI model: enable switch and consent status for the AI model's provider.
 - `components/AssistantConsentDialog.tsx`.
-- `components/MeetingDetails/MeetingAssistantPanel.tsx`, `SummaryBubble.tsx` and `hooks/meeting-details/useMeetingChat.ts` on the meeting page.
+- `components/MeetingDetails/MeetingAssistantPanel.tsx` and `hooks/meeting-details/useMeetingChat.ts` on the meeting page; the summary is a `recap` chat message.
 - `lib/model-catalog.ts` and `components/model-settings/CliAgentCard.tsx` list the CLI providers.
 
 ## Phase 2: Claude Code and Codex CLI providers

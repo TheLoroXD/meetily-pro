@@ -145,15 +145,6 @@ describe('summary state restored when returning to a meeting', () => {
     expect(timers.size).toBe(0);
   });
 
-  test('keeps regeneration loading with old content and restores content on failure', async () => {
-    await show(response({ data: { markdown: 'Previous summary' } }));
-    expect(text()).toContain('processing');
-    getSummary = async () => response({ status: 'failed', error: 'Model unavailable', data: { markdown: 'Previous summary' } });
-    await tick();
-    expect(text()).toContain('completed');
-    expect(text()).toContain('Previous summary');
-  });
-
   test('shows a failure that happened while the meeting was closed', async () => {
     await show(response({ status: 'failed', error: 'Model unavailable' }));
     expect(text()).toContain('error');
@@ -194,14 +185,6 @@ describe('summary state restored when returning to a meeting', () => {
 
   test('ignores a response belonging to another meeting', async () => {
     await show(response({ meeting_id: 'meeting-b' }));
-    expect(state.summaryStatus).toBe('idle');
-    expect(timers.size).toBe(0);
-  });
-
-  test('Stop uses the restored process token', async () => {
-    await show(response());
-    await act(async () => state.handleStopGeneration());
-    expect(invoke.mock.calls).toContainEqual(['api_cancel_summary', { meetingId: 'meeting-a', processId: 'attempt-a' }]);
     expect(state.summaryStatus).toBe('idle');
     expect(timers.size).toBe(0);
   });

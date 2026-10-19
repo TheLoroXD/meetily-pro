@@ -7,14 +7,12 @@ interface UseCopyOperationsProps {
   meeting: any;
   transcripts: Transcript[];
   meetingTitle: string;
-  summaryMarkdown: string;
 }
 
 export function useCopyOperations({
   meeting,
   transcripts,
   meetingTitle,
-  summaryMarkdown,
 }: UseCopyOperationsProps) {
 
   // Helper function to fetch ALL transcripts for copying (not just paginated data)
@@ -89,41 +87,7 @@ export function useCopyOperations({
     toast.success("Transcript copied to clipboard");
   }, [meeting, meetingTitle, fetchAllTranscripts]);
 
-  const handleCopySummary = useCallback(async () => {
-    if (!summaryMarkdown) {
-      toast.error('No summary content available to copy');
-      return;
-    }
-    try {
-      // Build metadata header
-      const header = `# Meeting Summary: ${meetingTitle}\n\n`;
-      const metadata = `**Meeting ID:** ${meeting.id}\n**Date:** ${new Date(meeting.created_at).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })}\n**Copied on:** ${new Date().toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })}\n\n---\n\n`;
-
-      const fullMarkdown = header + metadata + summaryMarkdown;
-      await navigator.clipboard.writeText(fullMarkdown);
-
-      console.log('✅ Successfully copied to clipboard!');
-      toast.success("Summary copied to clipboard");
-    } catch (error) {
-      console.error('❌ Failed to copy summary:', error);
-      toast.error("Failed to copy summary");
-    }
-  }, [summaryMarkdown, meetingTitle, meeting]);
-
   return {
     handleCopyTranscript,
-    handleCopySummary,
   };
 }

@@ -1,8 +1,7 @@
 'use client';
 
 import { Copy, Pin, PinOff, X } from 'lucide-react';
-import { toast } from 'sonner';
-import { ClockLink } from '@/components/AssistantChat';
+import { ClockLink, copyText } from '@/components/AssistantChat';
 import { KIND_META, formatClock, type Suggestion } from '@/lib/live-assistant';
 
 export function SuggestionCard({ item, onPin, onDismiss, onAsk }: { item: Suggestion; onPin?: (pinned: boolean) => void; onDismiss: () => void; onAsk?: () => void }) {
@@ -15,7 +14,7 @@ export function SuggestionCard({ item, onPin, onDismiss, onAsk }: { item: Sugges
           <ClockLink seconds={item.at_seconds} label={formatClock(item.at_seconds)} className="text-[11px] text-gray-500 hover:text-blue-600" />
         </div>
         <div className="flex items-center gap-0.5">
-          <button type="button" className="p-1 text-gray-400 hover:text-gray-700" title="Copy" onClick={() => { navigator.clipboard?.writeText(item.text); toast.success('Copied'); }}>
+          <button type="button" className="p-1 text-gray-400 hover:text-gray-700" title="Copy" onClick={() => copyText(item.text)}>
             <Copy size={14} />
           </button>
           {onPin && (

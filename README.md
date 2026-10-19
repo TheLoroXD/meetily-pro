@@ -32,6 +32,13 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 
 ## What's new
 
+### v1.6.0
+
+- When a meeting ends, the assistant posts a short summary right into the chat; just keep asking if you want more detail.
+- Summaries are shorter: what the meeting was about, what was decided and what happens next.
+- The chat memory gauge now sits next to the message box and turns into a Compact link when the chat gets long.
+- Copy any assistant reply with one click.
+
 ### v1.5.0
 
 - Paste long texts into the assistant chat; a gauge shows how full its memory is, and Compact keeps a short summary so you can keep going.
@@ -45,14 +52,6 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 - The live assistant now brings useful facts and tips, not only questions.
 - Change the transcription language during a call (Whisper).
 
-### v1.3.0
-
-- Meetily is now Meetily Pro, with a new icon.
-- When a call ends, its summary appears above the assistant chat, and you can keep asking about the meeting, even days later.
-- One AI model writes summaries and answers your questions.
-- Follows your system light or dark mode.
-- Simpler settings: General, Recordings and Models. Usage analytics are gone.
-
 ## Features
 
 Live transcription on device (Whisper with Metal/CUDA/Vulkan/ROCm, or Parakeet on CPU), VAD so only speech hits the model.
@@ -61,7 +60,7 @@ Live transcription on device (Whisper with Metal/CUDA/Vulkan/ROCm, or Parakeet o
 
 Live assistant beside the transcript: questions and tips cited to transcript moments, plus a chat about the call so far. Design: [docs/LIVE_ASSISTANT_DESIGN.md](docs/LIVE_ASSISTANT_DESIGN.md).
 
-When a call ends, its summary appears above the assistant chat, and the chat stays open for follow-up questions about the meeting.
+When a call ends, the assistant posts a short recap into the meeting chat, and the chat stays open for follow-up questions about the meeting.
 
 <p align="center"><img src="docs/summary.png" width="720" alt="Summary" /></p>
 
@@ -82,8 +81,6 @@ Mic and system audio mixed with ducking and clip protection; everything stored a
 ## Configuration
 
 All settings are in the app. Data lives in the Tauri app data dir (`~/Library/Application Support/com.meetily.ai`, `%APPDATA%\com.meetily.ai`, `~/.local/share/com.meetily.ai`): `meeting_minutes.sqlite`, `models/`, and a recordings folder with one directory per meeting.
-
-Custom summary template: a `standard_meeting.json` in `Meetily/templates/` under the user data dir overrides the bundled one. Schema: [templates/README.md](frontend/src-tauri/templates/README.md).
 
 ## Build from source
 

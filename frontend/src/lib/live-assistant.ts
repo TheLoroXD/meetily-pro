@@ -14,7 +14,7 @@ export interface Suggestion {
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'summary';
+  role: 'user' | 'assistant' | 'summary' | 'recap';
   text: string;
   error: boolean;
 }
@@ -24,7 +24,7 @@ export interface ChatContext {
   limit: number;
 }
 
-export const COMPACT_FROM_PERCENT = 50;
+export const COMPACT_FROM_PERCENT = 60;
 
 export function contextPercent(context: ChatContext): number {
   return context.limit > 0 ? Math.round((context.used / context.limit) * 100) : 0;
@@ -143,9 +143,4 @@ export function buildPinnedPromptSection(items: Suggestion[]): string {
   if (pinned.length === 0) return '';
   const lines = pinned.map((item) => `- [${formatClock(item.at_seconds)}] ${item.kind}: ${item.text}`);
   return `Pinned during the call by the user (give these extra attention):\n${lines.join('\n')}`;
-}
-
-export function appendPinnedSection(customPrompt: string, section: string): string {
-  if (!section) return customPrompt;
-  return customPrompt.trim() ? `${customPrompt.trim()}\n\n${section}` : section;
 }
