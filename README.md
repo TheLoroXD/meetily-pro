@@ -32,6 +32,13 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 
 ## What's new
 
+### v1.5.0
+
+- Paste long texts into the assistant chat; a gauge shows how full its memory is, and Compact keeps a short summary so you can keep going.
+- Live tips follow what you ask in the chat and the whole meeting so far, and arrive one to three at a time.
+- Questions and tips from a call stay on the meeting page until you close them.
+- Pick a model with the Use button next to each ready AI service.
+
 ### v1.4.0
 
 - Use your Claude Code or Codex sign-in as the AI model, no API key needed.
@@ -45,12 +52,6 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 - One AI model writes summaries and answers your questions.
 - Follows your system light or dark mode.
 - Simpler settings: General, Recordings and Models. Usage analytics are gone.
-
-### v1.2.0
-
-- One Models page in Settings: add your AI services and download models in one place.
-- Pick the voice, summary and assistant models separately, from the ones that work right now.
-- Your saved keys, server addresses and downloaded models carry over.
 
 ## Features
 

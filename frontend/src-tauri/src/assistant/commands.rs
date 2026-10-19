@@ -1,6 +1,6 @@
 use tauri::{AppHandle, Runtime};
 
-use super::meeting_chat;
+use super::meeting_chat::{self, MeetingChat};
 use super::prompt::{ChatMessage, Suggestion};
 use super::service::{self, LiveAssistantState};
 use super::settings::{self, AssistantSettings};
@@ -39,6 +39,11 @@ pub async fn ask_live_assistant<R: Runtime>(app: AppHandle<R>, question: String)
 }
 
 #[tauri::command]
+pub async fn compact_live_assistant<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    service::compact(&app).await
+}
+
+#[tauri::command]
 pub async fn get_live_assistant_state<R: Runtime>(app: AppHandle<R>) -> Result<LiveAssistantState, String> {
     Ok(service::snapshot(&app))
 }
@@ -70,22 +75,20 @@ pub async fn api_get_meeting_suggestions(
         .map_err(|e| e.to_string())
 }
 
-#[derive(serde::Serialize)]
-pub struct MeetingChat {
-    messages: Vec<ChatMessage>,
-    answering: bool,
+#[tauri::command]
+pub async fn api_dismiss_meeting_suggestion(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    id: String,
+) -> Result<(), String> {
+    MeetingSuggestionsRepository::dismiss(state.db_manager.pool(), &meeting_id, &id)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn api_get_meeting_chat(
-    state: tauri::State<'_, AppState>,
-    meeting_id: String,
-) -> Result<MeetingChat, String> {
-    let answering = meeting_chat::is_answering(&meeting_id);
-    let messages = MeetingChatRepository::get_for_meeting(state.db_manager.pool(), &meeting_id)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(MeetingChat { messages, answering })
+pub async fn api_get_meeting_chat<R: Runtime>(app: AppHandle<R>, meeting_id: String) -> Result<MeetingChat, String> {
+    meeting_chat::load(&app, &meeting_id).await
 }
 
 #[tauri::command]
@@ -93,8 +96,13 @@ pub async fn api_ask_meeting_assistant<R: Runtime>(
     app: AppHandle<R>,
     meeting_id: String,
     question: String,
-) -> Result<Vec<ChatMessage>, String> {
+) -> Result<MeetingChat, String> {
     meeting_chat::ask(&app, &meeting_id, question).await
+}
+
+#[tauri::command]
+pub async fn api_compact_meeting_chat<R: Runtime>(app: AppHandle<R>, meeting_id: String) -> Result<MeetingChat, String> {
+    meeting_chat::compact(&app, &meeting_id).await
 }
 
 async fn store_session(

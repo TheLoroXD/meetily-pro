@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use log::{info, warn};
+use log::{debug, info, warn};
 use serde::Serialize;
 use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
@@ -32,23 +32,22 @@ const FLOOR_CLOUD: Duration = Duration::from_secs(45);
 const FLOOR_BUILTIN: Duration = Duration::from_secs(90);
 const MANUAL_DEBOUNCE: Duration = Duration::from_secs(5);
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
-const OUTPUT_TOKENS: u32 = 400;
+const OUTPUT_TOKENS: u32 = 1024;
 const BUILTIN_INPUT_TOKENS: usize = 2000;
 const CLOUD_INPUT_TOKENS: usize = 8000;
 const OLLAMA_HEADROOM_TOKENS: usize = 800;
 const OLLAMA_FALLBACK_CONTEXT: usize = 4096;
-const MAX_ERROR_CHARS: usize = 160;
+const MAX_ERROR_CHARS: usize = 240;
 const MAX_DISMISSED_IN_PROMPT: usize = 20;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const CHAT_OUTPUT_TOKENS: u32 = 500;
-const MAX_CHAT_HISTORY: usize = 12;
-const MAX_QUESTION_CHARS: usize = 2000;
+const COMPACT_TOKENS: u32 = 1000;
 const SNAPSHOT_FILE: &str = "suggestions.json";
 
 static HTTP_CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(reqwest::Client::new);
 
 static PROVIDER_STATUS: std::sync::LazyLock<regex::Regex> =
-    std::sync::LazyLock::new(|| regex::Regex::new(r"failed with status (\d{3}[^:]*)").unwrap());
+    std::sync::LazyLock::new(|| regex::Regex::new(r"(?s)failed with status (\d{3}[^:]*):?(.*)").unwrap());
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -75,6 +74,13 @@ pub struct LiveAssistantState {
     pub suggestions: Vec<Suggestion>,
     pub chat: Vec<ChatMessage>,
     pub chat_pending: bool,
+    pub chat_context: Option<ChatContext>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ChatContext {
+    pub used: usize,
+    pub limit: usize,
 }
 
 pub struct TriggerInput {
@@ -165,6 +171,7 @@ struct SessionData {
     last_manual: Option<Instant>,
     meeting_folder: Option<PathBuf>,
     inflight: Option<CancellationToken>,
+    input_budget: usize,
 }
 
 impl SessionData {
@@ -200,18 +207,13 @@ impl SessionData {
             last_manual: None,
             meeting_folder: None,
             inflight: None,
+            input_budget: 0,
         }
     }
 
     fn push_chat(&mut self, role: ChatRole, text: String, error: bool) {
         let id = format!("c{}", self.chat.len() + 1);
         self.chat.push(ChatMessage { id, role, text, error });
-    }
-
-    fn pause_for_consent(&mut self) {
-        self.paused = true;
-        self.pending = false;
-        self.status = AssistantStatus::Paused;
     }
 
     fn fail_setup(&mut self, error: &str) {
@@ -240,6 +242,7 @@ impl SessionData {
             suggestions: self.suggestions.clone(),
             chat: self.chat.clone(),
             chat_pending: self.chat_pending,
+            chat_context: (self.input_budget > 0).then(|| chat_context(&self.chat, self.input_budget)),
         }
     }
 }
@@ -458,6 +461,7 @@ pub fn snapshot<R: Runtime>(app: &AppHandle<R>) -> LiveAssistantState {
         suggestions,
         chat,
         chat_pending: false,
+        chat_context: None,
     }
 }
 
@@ -528,11 +532,20 @@ fn language_name(window: &[TranscriptSegment]) -> String {
 }
 
 pub(super) fn short_error(error: &str) -> String {
-    if let Some(captures) = PROVIDER_STATUS.captures(error) {
-        return format!("Provider returned {}", captures[1].trim());
-    }
-    let single_line: String = error.split_whitespace().collect::<Vec<_>>().join(" ");
+    let message = match PROVIDER_STATUS.captures(error) {
+        Some(captures) => match provider_message(&captures[2]) {
+            Some(reason) => format!("Provider returned {}: {}", captures[1].trim(), reason),
+            None => format!("Provider returned {}", captures[1].trim()),
+        },
+        None => error.to_string(),
+    };
+    let single_line: String = message.split_whitespace().collect::<Vec<_>>().join(" ");
     single_line.chars().take(MAX_ERROR_CHARS).collect()
+}
+
+fn provider_message(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
+    value["error"]["message"].as_str().map(str::to_string)
 }
 
 fn persist_snapshot(folder: &Path, data: &SessionData) {
@@ -568,7 +581,6 @@ pub fn read_snapshot(folder: &Path) -> (Vec<Suggestion>, Vec<ChatMessage>) {
 pub(super) struct RequestPlan {
     pub(super) provider_settings: ProviderSettings,
     cloud: bool,
-    consented: bool,
     provider_label: String,
     pub(super) model: String,
 }
@@ -578,13 +590,14 @@ pub(super) async fn resolve_request<R: Runtime>(app: &AppHandle<R>) -> Result<Re
     let (provider_label, model) = resolve_target(&pool).await?;
     let provider_settings = resolve_provider_settings(&pool, &provider_label).await?;
     let cloud = is_cloud(&provider_settings.provider, provider_settings.ollama_endpoint.as_deref());
-    let consented = !cloud || settings::load(app).has_cloud_consent(&provider_label);
-    Ok(RequestPlan { provider_settings, cloud, consented, provider_label, model })
+    Ok(RequestPlan { provider_settings, cloud, provider_label, model })
 }
 
 async fn resolve_plan<R: Runtime>(app: &AppHandle<R>, data: &Arc<Mutex<SessionData>>) -> Result<RequestPlan, String> {
     let plan = resolve_request(app).await?;
+    let budget = input_budget(&plan.provider_settings, &plan.model).await;
     let mut guard = lock_data(data);
+    guard.input_budget = budget;
     guard.provider = plan.provider_label.clone();
     guard.model = plan.model.clone();
     guard.is_cloud = plan.cloud;
@@ -641,7 +654,7 @@ async fn run_tick<R: Runtime>(
     if segments.is_empty() {
         return Err("No transcript yet".to_string());
     }
-    let budget = input_budget(&plan.provider_settings, &plan.model).await;
+    let budget = lock_data(data).input_budget;
     let language = language_name(prompt::select_window(segments, budget));
     let prefix = {
         let guard = lock_data(data);
@@ -659,6 +672,7 @@ async fn run_tick<R: Runtime>(
             state: &guard.state_text,
             open: &guard.suggestions,
             dismissed_texts: &dismissed,
+            user_messages: &user_messages(&guard.chat, budget / 6),
         })
     };
     let window_budget = budget.saturating_sub(rough_token_count(&prefix)).max(200);
@@ -667,7 +681,11 @@ async fn run_tick<R: Runtime>(
     let through_seq = window.last().map(|s| s.sequence_id);
     let options = CompletionOptions { json_mode: true, max_tokens: Some(OUTPUT_TOKENS), json_schema: Some(prompt::SUGGESTIONS_SCHEMA) };
     let content = call_model(app, plan, prompt::SYSTEM_PROMPT, &user_prompt, token, options).await?;
-    Ok((prompt::parse_model_output(&content)?, through_seq))
+    let output = prompt::parse_model_output(&content).inspect_err(|_| {
+        warn!("Unreadable assistant output ({} chars)", content.len());
+        debug!("Unreadable assistant output: {}", content.chars().take(300).collect::<String>());
+    })?;
+    Ok((output, through_seq))
 }
 
 pub(super) fn checked_question(question: String) -> Result<String, String> {
@@ -675,14 +693,35 @@ pub(super) fn checked_question(question: String) -> Result<String, String> {
     if question.is_empty() {
         return Err("Type a question first".to_string());
     }
-    if question.chars().count() > MAX_QUESTION_CHARS {
-        return Err(format!("Keep the question under {} characters", MAX_QUESTION_CHARS));
-    }
     Ok(question)
 }
 
 pub async fn ask<R: Runtime>(app: &AppHandle<R>, question: String) -> Result<(), String> {
     let question = checked_question(question)?;
+    chat_turn(app, Some(question), ChatRole::Assistant, |data, token| async move {
+        answer_chat(app, &data, &token).await
+    })
+    .await
+}
+
+pub async fn compact<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    chat_turn(app, None, ChatRole::Summary, |data, token| async move {
+        let plan = resolve_plan(app, &data).await?;
+        let (chat, budget) = {
+            let guard = lock_data(&data);
+            (guard.chat.clone(), guard.input_budget)
+        };
+        compact_chat(app, &plan, &chat, budget, &token).await
+    })
+    .await
+}
+
+async fn chat_turn<R, F, Fut>(app: &AppHandle<R>, question: Option<String>, role: ChatRole, work: F) -> Result<(), String>
+where
+    R: Runtime,
+    F: FnOnce(Arc<Mutex<SessionData>>, CancellationToken) -> Fut,
+    Fut: std::future::Future<Output = Result<String, String>>,
+{
     let (data, token) = with_session(app, |session| (session.data.clone(), session.token.clone()))
         .ok_or_else(|| "Chat works while a recording is running".to_string())?;
     let chat_token = token.child_token();
@@ -693,32 +732,40 @@ pub async fn ask<R: Runtime>(app: &AppHandle<R>, question: String) -> Result<(),
         }
         guard.chat_pending = true;
         guard.chat_inflight = Some(chat_token.clone());
-        guard.push_chat(ChatRole::User, question, false);
+        if let Some(question) = question {
+            guard.push_chat(ChatRole::User, question, false);
+        }
         emit_status(app, &guard, true);
     }
-    let answer = answer_chat(app, &data, &chat_token).await;
+    let answer = work(data.clone(), chat_token).await;
     if token.is_cancelled() {
         return Ok(());
     }
     let mut guard = lock_data(&data);
     guard.chat_pending = false;
     let paused_mid_answer = guard.chat_inflight.take().is_none();
-    match answer {
-        Ok(text) => guard.push_chat(ChatRole::Assistant, text, false),
+    let outcome = match answer {
+        Ok(text) => {
+            guard.push_chat(role, text, false);
+            Ok(())
+        }
+        Err(error) if role == ChatRole::Summary => Err(short_error(&error)),
         Err(_) if paused_mid_answer => {
             guard.push_chat(ChatRole::Assistant, "Stopped because the assistant was paused".to_string(), true);
+            Ok(())
         }
         Err(error) => {
             let error = short_error(&error);
             warn!("Live assistant chat failed: {}", error);
             guard.push_chat(ChatRole::Assistant, error, true);
+            Ok(())
         }
-    }
+    };
     emit_status(app, &guard, true);
     if let Some(folder) = guard.meeting_folder.clone() {
         persist_snapshot(&folder, &guard);
     }
-    Ok(())
+    outcome
 }
 
 async fn answer_chat<R: Runtime>(
@@ -727,12 +774,8 @@ async fn answer_chat<R: Runtime>(
     chat_token: &CancellationToken,
 ) -> Result<String, String> {
     let plan = resolve_plan(app, data).await?;
-    if !plan.consented {
-        return Err(format!("Allow sending the live transcript to {} first", plan.provider_label));
-    }
     let snapshot = live_transcript_snapshot().ok_or_else(|| "No active recording".to_string())?;
-    let budget = input_budget(&plan.provider_settings, &plan.model).await;
-    let (prefix, chat) = {
+    let (prefix, chat, budget) = {
         let guard = lock_data(data);
         let prefix = prompt::build_prefix(&PromptContext {
             title: snapshot.meeting_name.as_deref().unwrap_or(""),
@@ -740,8 +783,9 @@ async fn answer_chat<R: Runtime>(
             state: &guard.state_text,
             open: &guard.suggestions,
             dismissed_texts: &[],
+            user_messages: &[],
         });
-        (prefix, guard.chat.clone())
+        (prefix, guard.chat.clone(), guard.input_budget)
     };
     let request = ChatRequest {
         system_prompt: prompt::CHAT_SYSTEM_PROMPT,
@@ -769,7 +813,7 @@ pub(super) async fn answer_question<R: Runtime>(
     request: ChatRequest<'_>,
     token: &CancellationToken,
 ) -> Result<String, String> {
-    let history = recent_chat(request.chat, request.budget / 3);
+    let history = recent_chat(request.chat, chat_budget(request.budget));
     let history_tokens: usize = history.iter().map(|m| rough_token_count(&m.text)).sum();
     let window_budget = request
         .budget
@@ -789,10 +833,83 @@ fn visible_chat_answer(content: &str, segments: &[TranscriptSegment]) -> Result<
     Ok(prompt::unlink_unknown_citations(&cleaned.markdown, segments))
 }
 
+fn chat_memory(chat: &[ChatMessage]) -> impl Iterator<Item = &ChatMessage> {
+    let start = chat
+        .iter()
+        .rposition(|m| m.role == ChatRole::Summary && !m.error)
+        .unwrap_or(0);
+    chat[start..].iter().filter(|m| !m.error)
+}
+
+fn chat_budget(input_budget: usize) -> usize {
+    input_budget / 3
+}
+
+pub(super) fn chat_context(chat: &[ChatMessage], input_budget: usize) -> ChatContext {
+    ChatContext {
+        used: chat_memory(chat).map(|m| rough_token_count(&m.text)).sum(),
+        limit: chat_budget(input_budget),
+    }
+}
+
 fn recent_chat(chat: &[ChatMessage], budget_tokens: usize) -> Vec<ChatMessage> {
-    let turns: Vec<ChatMessage> = chat.iter().filter(|m| !m.error).cloned().collect();
-    let skip = turns.len().saturating_sub(MAX_CHAT_HISTORY);
-    prompt::newest_within_budget(&turns[skip..], budget_tokens, |m| rough_token_count(&m.text)).to_vec()
+    let memory: Vec<&ChatMessage> = chat_memory(chat).collect();
+    prompt::newest_within_budget(&memory, budget_tokens, |m| rough_token_count(&m.text))
+        .iter()
+        .map(|m| (*m).clone())
+        .collect()
+}
+
+fn user_messages(chat: &[ChatMessage], budget_tokens: usize) -> Vec<ChatMessage> {
+    let own: Vec<&ChatMessage> = chat_memory(chat).filter(|m| m.role != ChatRole::Assistant).collect();
+    prompt::newest_within_budget(&own, budget_tokens, |m| rough_token_count(&m.text).min(budget_tokens))
+        .iter()
+        .map(|m| ChatMessage { text: truncate_to_tokens(&m.text, budget_tokens), ..(*m).clone() })
+        .collect()
+}
+
+pub(super) fn truncate_to_tokens(text: &str, tokens: usize) -> String {
+    if rough_token_count(text) <= tokens {
+        return text.to_string();
+    }
+    let chars = text.chars().count() * tokens / rough_token_count(text).max(1);
+    text.chars().take(chars).collect()
+}
+
+fn compaction_input(memory: &[ChatMessage], input_budget: usize) -> Vec<ChatMessage> {
+    let cost = |m: &ChatMessage| rough_token_count(&m.text);
+    let (summary, rest) = match memory.split_first() {
+        Some((first, rest)) if first.role == ChatRole::Summary => (Some(first), rest),
+        _ => (None, memory),
+    };
+    let rest_budget = input_budget.saturating_sub(summary.map_or(0, cost));
+    summary
+        .into_iter()
+        .chain(prompt::newest_within_budget(rest, rest_budget, cost))
+        .cloned()
+        .collect()
+}
+
+pub(super) async fn compact_chat<R: Runtime>(
+    app: &AppHandle<R>,
+    plan: &RequestPlan,
+    chat: &[ChatMessage],
+    input_budget: usize,
+    token: &CancellationToken,
+) -> Result<String, String> {
+    let memory: Vec<ChatMessage> = chat_memory(chat).cloned().collect();
+    if memory.len() < 2 {
+        return Err("Nothing to compact yet".to_string());
+    }
+    let kept = compaction_input(&memory, input_budget);
+    let words = (chat_budget(input_budget) / 4).clamp(60, 300);
+    let user_prompt = format!("Chat:\n{}\nWrite the summary in under {} words.", prompt::format_chat(&kept), words);
+    info!("Compacting assistant chat via {}/{}", plan.provider_label, plan.model);
+    let options = CompletionOptions { json_mode: false, max_tokens: Some(COMPACT_TOKENS), json_schema: None };
+    let content = call_model(app, plan, prompt::COMPACT_SYSTEM_PROMPT, &user_prompt, token, options).await?;
+    let cleaned = clean_llm_markdown_detailed(&content);
+    require_visible_markdown("Chat summary", &cleaned)?;
+    Ok(cleaned.markdown)
 }
 
 fn defer_for_busy_sidecar<R: Runtime>(app: &AppHandle<R>, data: &Arc<Mutex<SessionData>>, manual: bool) {
@@ -817,10 +934,8 @@ async fn run_loop<R: Runtime>(
     let initial = resolve_plan(&app, &data).await;
     if !token.is_cancelled() {
         let mut guard = lock_data(&data);
-        match initial {
-            Ok(plan) if !plan.consented => guard.pause_for_consent(),
-            Ok(_) => {}
-            Err(error) => guard.fail_setup(&error),
+        if let Err(error) = initial {
+            guard.fail_setup(&error);
         }
         emit_status(&app, &guard, true);
     }
@@ -892,12 +1007,6 @@ async fn run_loop<R: Runtime>(
             break;
         }
         let plan = match planned {
-            Ok(plan) if !plan.consented => {
-                let mut guard = lock_data(&data);
-                guard.pause_for_consent();
-                emit_status(&app, &guard, true);
-                continue;
-            }
             Ok(plan) => plan,
             Err(error) => {
                 let mut guard = lock_data(&data);
@@ -1131,7 +1240,61 @@ mod tests {
         assert_eq!(ids(recent_chat(&chat, 10_000)), vec!["c1", "c2", "c3"]);
         assert_eq!(ids(recent_chat(&chat[..1], 5)), vec!["c1"]);
         let long: Vec<ChatMessage> = (0..20).map(|i| message(&format!("c{}", i), 1)).collect();
-        assert_eq!(recent_chat(&long, 10_000).len(), MAX_CHAT_HISTORY);
+        assert_eq!(recent_chat(&long, 10_000).len(), 20);
+    }
+
+    #[test]
+    fn compacted_chat_starts_from_its_summary() {
+        let message = |id: &str, role: ChatRole, text: &str| ChatMessage { id: id.to_string(), role, text: text.to_string(), error: false };
+        let chat = vec![
+            message("c1", ChatRole::User, &"old ".repeat(300)),
+            message("c2", ChatRole::Assistant, &"answer ".repeat(300)),
+            message("c3", ChatRole::Summary, "Asked who owns the rollout"),
+            message("c4", ChatRole::User, "And the budget?"),
+            message("c5", ChatRole::Assistant, "Not discussed yet"),
+        ];
+        let ids: Vec<String> = recent_chat(&chat, 10_000).into_iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec!["c3", "c4", "c5"]);
+        let context = chat_context(&chat, 3000);
+        assert_eq!(context.limit, 1000);
+        assert_eq!(context.used, ["Asked who owns the rollout", "And the budget?", "Not discussed yet"].iter().map(|t| rough_token_count(t)).sum::<usize>());
+        let own: Vec<String> = user_messages(&chat, 10_000).into_iter().map(|m| m.id).collect();
+        assert_eq!(own, vec!["c3", "c4"]);
+    }
+
+    #[test]
+    fn compaction_keeps_the_earlier_summary_when_the_chat_overflows() {
+        let message = |id: &str, role: ChatRole, words: usize| ChatMessage { id: id.to_string(), role, text: "word ".repeat(words), error: false };
+        let memory = vec![
+            message("c1", ChatRole::Summary, 10),
+            message("c2", ChatRole::User, 400),
+            message("c3", ChatRole::User, 10),
+            message("c4", ChatRole::Assistant, 10),
+        ];
+        let ids: Vec<String> = compaction_input(&memory, 100).into_iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec!["c1", "c3", "c4"]);
+        let ids: Vec<String> = compaction_input(&memory[1..], 100).into_iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec!["c3", "c4"]);
+    }
+
+    #[test]
+    fn a_long_pasted_message_is_cut_for_suggestions_only() {
+        let pasted = "word ".repeat(5000);
+        assert_eq!(checked_question(pasted.clone()).unwrap(), pasted.trim());
+        let chat = vec![ChatMessage { id: "c1".to_string(), role: ChatRole::User, text: pasted, error: false }];
+        let own = user_messages(&chat, 100);
+        assert_eq!(own.len(), 1);
+        assert!(rough_token_count(&own[0].text) <= 110);
+        assert_eq!(recent_chat(&chat, 100)[0].text, chat[0].text);
+    }
+
+    #[test]
+    fn truncation_keeps_short_text_and_cuts_long_text() {
+        assert_eq!(truncate_to_tokens("short", 100), "short");
+        let long = "word ".repeat(2000);
+        let cut = truncate_to_tokens(&long, 100);
+        assert!(rough_token_count(&cut) <= 110);
+        assert!(long.starts_with(&cut));
     }
 
     #[test]
@@ -1170,6 +1333,13 @@ mod tests {
     fn short_error_hides_provider_response_bodies() {
         let error = "LLM API request failed with status 401 Unauthorized: {\"error\":\"echo of the transcript text\"}";
         assert_eq!(short_error(error), "Provider returned 401 Unauthorized");
+        assert_eq!(short_error("LLM API request failed with status 500 Internal Server Error: echo"), "Provider returned 500 Internal Server Error");
+    }
+
+    #[test]
+    fn short_error_keeps_the_providers_own_reason() {
+        let error = "LLM API request failed with status 404 Not Found: {\"error\":{\"message\":\"Model blocked\\nby guardrail\",\"code\":404}}";
+        assert_eq!(short_error(error), "Provider returned 404 Not Found: Model blocked by guardrail");
     }
 
     #[test]

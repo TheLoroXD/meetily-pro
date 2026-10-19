@@ -57,7 +57,7 @@ pub struct CompletionOptions {
 fn supports_json_mode(provider: &LLMProvider) -> bool {
     matches!(
         provider,
-        LLMProvider::OpenAI | LLMProvider::Groq | LLMProvider::Ollama
+        LLMProvider::OpenAI | LLMProvider::Groq | LLMProvider::Ollama | LLMProvider::OpenRouter
     )
 }
 
@@ -78,7 +78,7 @@ pub fn build_openai_compat_chat_body(
         (None, None, None)
     };
     let max_tokens_val = match options.max_tokens {
-        Some(limit) if *provider != LLMProvider::OpenAI => Some(limit),
+        Some(limit) if matches!(provider, LLMProvider::Ollama | LLMProvider::CustomOpenAI) => Some(limit),
         _ => max_tokens_val,
     };
 
@@ -661,6 +661,19 @@ mod tests {
         assert_eq!(custom["max_tokens"], 12);
         assert_eq!(custom["temperature"].as_f64(), Some(0.3_f32 as f64));
         assert_eq!(custom["top_p"].as_f64(), Some(0.8_f32 as f64));
+    }
+
+    #[test]
+    fn output_cap_applies_only_to_self_hosted_models() {
+        let options = CompletionOptions { json_mode: true, max_tokens: Some(64), json_schema: None };
+        for provider in [LLMProvider::OpenAI, LLMProvider::Groq, LLMProvider::OpenRouter] {
+            assert!(build_openai_compat_chat_body(&provider, "m", "s", "u", None, None, None, options).get("max_tokens").is_none());
+        }
+        for provider in [LLMProvider::Ollama, LLMProvider::CustomOpenAI] {
+            assert_eq!(build_openai_compat_chat_body(&provider, "m", "s", "u", None, None, None, options)["max_tokens"], 64);
+        }
+        let openrouter = build_openai_compat_chat_body(&LLMProvider::OpenRouter, "m", "s", "u", None, None, None, options);
+        assert_eq!(openrouter["response_format"]["type"], "json_object");
     }
 
     #[test]

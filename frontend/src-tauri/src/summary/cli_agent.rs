@@ -15,7 +15,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const SHELL_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_MODEL: &str = "default";
 const CLAUDE_CODE_MODELS: [&str; 3] = ["sonnet", "opus", "haiku"];
-const CLAUDE_CODE_SCRUBBED_ENV: [&str; 3] = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"];
+const CLAUDE_CODE_SETTINGS: &str = r#"{"disableAllHooks":true}"#;
 const CODEX_SCRUBBED_ENV: [&str; 2] = ["OPENAI_API_KEY", "CODEX_API_KEY"];
 const CODEX_DISABLED_FEATURES: [&str; 16] = [
     "shell_tool",
@@ -36,9 +36,15 @@ const CODEX_DISABLED_FEATURES: [&str; 16] = [
     "goals",
 ];
 const SCHEMA_FILE: &str = "schema.json";
-const PATH_MARKER: &str = "__MEETILY_PATH__";
+const ENV_MARKER: &str = "__MEETILY_ENV__";
+const SHELL_ONLY_VARS: [&str; 5] = ["PATH", "PWD", "OLDPWD", "SHLVL", "_"];
 
-static SEARCH_PATH: OnceCell<OsString> = OnceCell::const_new();
+static LOGIN_ENV: OnceCell<LoginEnv> = OnceCell::const_new();
+
+struct LoginEnv {
+    path: OsString,
+    vars: Vec<(String, String)>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CliAgent {
@@ -67,13 +73,6 @@ impl CliAgent {
             Self::ClaudeCode => &LLMProvider::ClaudeCode,
             Self::Codex => &LLMProvider::Codex,
         })
-    }
-
-    fn scrubbed_env(self) -> &'static [&'static str] {
-        match self {
-            Self::ClaudeCode => &CLAUDE_CODE_SCRUBBED_ENV,
-            Self::Codex => &CODEX_SCRUBBED_ENV,
-        }
     }
 
     fn sign_in_args(self) -> [&'static str; 2] {
@@ -120,18 +119,33 @@ fn build_search_path(login_path: Option<&str>, process_path: Option<&OsStr>, hom
     std::env::join_paths(unique_dirs(dirs)).unwrap_or_default()
 }
 
-fn extract_marked_path(stdout: &str) -> Option<&str> {
-    let mut parts = stdout.split(PATH_MARKER);
+fn extract_marked(stdout: &str) -> Option<&str> {
+    let mut parts = stdout.split(ENV_MARKER);
     parts.next()?;
-    let path = parts.next()?;
+    let marked = parts.next()?;
     parts.next()?;
-    (!path.trim().is_empty()).then_some(path)
+    (!marked.trim().is_empty()).then_some(marked)
+}
+
+fn parse_env(listing: &str) -> Vec<(String, String)> {
+    let entries: Vec<&str> = if listing.contains('\0') { listing.split('\0').collect() } else { listing.lines().collect() };
+    entries
+        .into_iter()
+        .filter_map(|entry| entry.split_once('='))
+        .filter(|(name, _)| {
+            name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect()
 }
 
 #[cfg(unix)]
-async fn login_shell_path() -> Option<String> {
-    let shell = std::env::var("SHELL").ok().filter(|shell| !shell.is_empty())?;
-    let script = format!("printf '{marker}%s{marker}' \"$PATH\"", marker = PATH_MARKER);
+async fn login_shell_env() -> Vec<(String, String)> {
+    let Some(shell) = std::env::var("SHELL").ok().filter(|shell| !shell.is_empty()) else {
+        return Vec::new();
+    };
+    let script = format!("printf '{marker}'; env -0 2>/dev/null || env; printf '{marker}'", marker = ENV_MARKER);
     let mut command = Command::new(shell);
     command
         .args(["-l", "-i", "-c", &script])
@@ -140,20 +154,25 @@ async fn login_shell_path() -> Option<String> {
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .process_group(0);
-    let output = run(command, "", SHELL_TIMEOUT, None).await.ok()?;
-    extract_marked_path(&String::from_utf8_lossy(&output.stdout)).map(str::to_string)
+    let Ok(output) = run(command, "", SHELL_TIMEOUT, None).await else {
+        return Vec::new();
+    };
+    extract_marked(&String::from_utf8_lossy(&output.stdout)).map(parse_env).unwrap_or_default()
 }
 
 #[cfg(not(unix))]
-async fn login_shell_path() -> Option<String> {
-    None
+async fn login_shell_env() -> Vec<(String, String)> {
+    Vec::new()
 }
 
-async fn search_path() -> &'static OsString {
-    SEARCH_PATH
+async fn login_env() -> &'static LoginEnv {
+    LOGIN_ENV
         .get_or_init(|| async {
-            let login = login_shell_path().await;
-            build_search_path(login.as_deref(), std::env::var_os("PATH").as_deref(), dirs::home_dir().as_deref())
+            let vars = login_shell_env().await;
+            let login_path = vars.iter().find(|(name, _)| name == "PATH").map(|(_, value)| value.as_str());
+            let path = build_search_path(login_path, std::env::var_os("PATH").as_deref(), dirs::home_dir().as_deref());
+            let vars = vars.into_iter().filter(|(name, _)| !SHELL_ONLY_VARS.contains(&name.as_str())).collect();
+            LoginEnv { path, vars }
         })
         .await
 }
@@ -168,19 +187,25 @@ fn locate(_agent: CliAgent, _path: &OsStr) -> Option<PathBuf> {
     None
 }
 
-fn command(agent: CliAgent, binary: &Path, path: &OsStr) -> Command {
+fn command(agent: CliAgent, binary: &Path, env: &LoginEnv) -> Command {
     let mut command = Command::new(binary);
     command
-        .env("PATH", path)
+        .envs(env.vars.iter().map(|(name, value)| (name, value)))
+        .env("PATH", &env.path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    for name in agent.scrubbed_env() {
-        command.env_remove(name);
-    }
-    if agent == CliAgent::ClaudeCode {
-        command.env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
+    match agent {
+        CliAgent::ClaudeCode => {
+            command.env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
+            command.env("CLAUDE_CODE_DISABLE_CLAUDE_MDS", "1");
+        }
+        CliAgent::Codex => {
+            for name in CODEX_SCRUBBED_ENV {
+                command.env_remove(name);
+            }
+        }
     }
     #[cfg(unix)]
     command.process_group(0);
@@ -224,8 +249,8 @@ async fn run(mut command: Command, input: &str, limit: Duration, token: Option<&
     Ok(output)
 }
 
-async fn probe(agent: CliAgent, binary: &Path, path: &OsStr, args: &[&str]) -> Option<Output> {
-    let mut command = command(agent, binary, path);
+async fn probe(agent: CliAgent, binary: &Path, env: &LoginEnv, args: &[&str]) -> Option<Output> {
+    let mut command = command(agent, binary, env);
     command.args(args).current_dir(std::env::temp_dir());
     run(command, "", PROBE_TIMEOUT, None).await.ok()
 }
@@ -264,10 +289,10 @@ fn parse_codex_models(stdout: &[u8]) -> Vec<String> {
     listed.into_iter().map(|(_, slug)| slug).collect()
 }
 
-async fn models(agent: CliAgent, binary: &Path, path: &OsStr) -> Vec<String> {
+async fn models(agent: CliAgent, binary: &Path, env: &LoginEnv) -> Vec<String> {
     let listed = match agent {
         CliAgent::ClaudeCode => CLAUDE_CODE_MODELS.map(str::to_string).to_vec(),
-        CliAgent::Codex => probe(agent, binary, path, &["debug", "models"])
+        CliAgent::Codex => probe(agent, binary, env, &["debug", "models"])
             .await
             .filter(|output| output.status.success())
             .map(|output| parse_codex_models(&output.stdout))
@@ -281,21 +306,21 @@ async fn models(agent: CliAgent, binary: &Path, path: &OsStr) -> Vec<String> {
 }
 
 pub async fn status(agent: CliAgent) -> CliAgentStatus {
-    let path = search_path().await;
-    let Some(binary) = locate(agent, path) else {
+    let env = login_env().await;
+    let Some(binary) = locate(agent, &env.path) else {
         return CliAgentStatus { installed: false, version: None, signed_in: false, models: Vec::new() };
     };
     let sign_in_args = agent.sign_in_args();
     let (version, sign_in) = tokio::join!(
-        probe(agent, &binary, path, &["--version"]),
-        probe(agent, &binary, path, &sign_in_args)
+        probe(agent, &binary, env, &["--version"]),
+        probe(agent, &binary, env, &sign_in_args)
     );
     let signed_in = sign_in.is_some_and(|output| output.status.success());
     CliAgentStatus {
         installed: true,
         version: version.and_then(|output| nonempty_lines(&output.stdout).into_iter().next()).map(|line| short_version(&line)),
         signed_in,
-        models: if signed_in { models(agent, &binary, path).await } else { Vec::new() },
+        models: if signed_in { models(agent, &binary, env).await } else { Vec::new() },
     }
 }
 
@@ -311,7 +336,9 @@ fn claude_code_args<'a>(model: &'a str, system_prompt: &'a str, json_schema: Opt
         "--no-session-persistence",
         "--strict-mcp-config",
         "--setting-sources",
-        "",
+        "user",
+        "--settings",
+        CLAUDE_CODE_SETTINGS,
         "--disable-slash-commands",
         "--model",
         model,
@@ -337,9 +364,13 @@ fn codex_credentials_store(config: &str) -> Option<String> {
         })
 }
 
-fn user_codex_credentials_store() -> Option<String> {
-    let home = std::env::var_os("CODEX_HOME")
-        .map(PathBuf::from)
+fn user_codex_credentials_store(env: &LoginEnv) -> Option<String> {
+    let home = env
+        .vars
+        .iter()
+        .find(|(name, _)| name == "CODEX_HOME")
+        .map(|(_, value)| PathBuf::from(value))
+        .or_else(|| std::env::var_os("CODEX_HOME").map(PathBuf::from))
         .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))?;
     codex_credentials_store(&std::fs::read_to_string(home.join("config.toml")).ok()?)
 }
@@ -422,10 +453,10 @@ pub async fn complete(
     json_schema: Option<&str>,
     token: Option<&CancellationToken>,
 ) -> Result<String, String> {
-    let path = search_path().await;
-    let binary = locate(agent, path).ok_or_else(|| format!("{} is not installed", agent.label()))?;
+    let env = login_env().await;
+    let binary = locate(agent, &env.path).ok_or_else(|| format!("{} is not installed", agent.label()))?;
     let workdir = tempfile::tempdir().map_err(|e| format!("Could not create a working folder: {}", e))?;
-    let mut command = command(agent, &binary, path);
+    let mut command = command(agent, &binary, env);
     command.current_dir(workdir.path());
     let input = match agent {
         CliAgent::ClaudeCode => {
@@ -434,7 +465,7 @@ pub async fn complete(
         }
         CliAgent::Codex => {
             let schema_file = json_schema.map(|schema| write_schema(&workdir, schema)).transpose()?;
-            command.args(codex_args(model, schema_file.as_deref(), user_codex_credentials_store().as_deref()));
+            command.args(codex_args(model, schema_file.as_deref(), user_codex_credentials_store(env).as_deref()));
             format!("{}\n\n{}", system_prompt, user_prompt)
         }
     };
@@ -480,11 +511,35 @@ mod tests {
     }
 
     #[test]
-    fn extracts_path_between_markers_and_ignores_shell_noise() {
-        let stdout = format!("welcome banner\n{m}/usr/bin:/opt/bin{m}", m = PATH_MARKER);
-        assert_eq!(extract_marked_path(&stdout), Some("/usr/bin:/opt/bin"));
-        assert_eq!(extract_marked_path("no markers here"), None);
-        assert_eq!(extract_marked_path(&format!("{m}{m}", m = PATH_MARKER)), None);
+    fn extracts_env_between_markers_and_ignores_shell_noise() {
+        let stdout = format!("welcome banner\n{m}PATH=/usr/bin:/opt/bin\n{m}", m = ENV_MARKER);
+        assert_eq!(extract_marked(&stdout), Some("PATH=/usr/bin:/opt/bin\n"));
+        assert_eq!(extract_marked("no markers here"), None);
+        assert_eq!(extract_marked(&format!("{m}{m}", m = ENV_MARKER)), None);
+    }
+
+    #[test]
+    fn reads_nul_separated_login_env_with_multiline_values() {
+        let listing = "ANTHROPIC_CUSTOM_HEADERS=X-A: 1\nX-B: 2\0HOME=/home/u\0";
+        assert_eq!(
+            parse_env(listing),
+            vec![
+                ("ANTHROPIC_CUSTOM_HEADERS".to_string(), "X-A: 1\nX-B: 2".to_string()),
+                ("HOME".to_string(), "/home/u".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_login_env_and_skips_shell_functions() {
+        let listing = "CLAUDE_CONFIG_DIR=/home/u/.claude-work\nBASH_FUNC_f%%=() {  a=1\n}\n  local b=2\nTOKEN=a=b\n";
+        assert_eq!(
+            parse_env(listing),
+            vec![
+                ("CLAUDE_CONFIG_DIR".to_string(), "/home/u/.claude-work".to_string()),
+                ("TOKEN".to_string(), "a=b".to_string()),
+            ]
+        );
     }
 
     #[cfg(unix)]
@@ -510,11 +565,12 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_runs_without_tools_sessions_or_user_settings() {
+    fn claude_code_runs_with_user_auth_but_without_tools_sessions_or_hooks() {
         let args = claude_code_args("haiku", "sys", None);
         let after = |flag: &str| args[args.iter().position(|arg| *arg == flag).unwrap() + 1];
         assert_eq!(after("--tools"), "");
-        assert_eq!(after("--setting-sources"), "");
+        assert_eq!(after("--setting-sources"), "user");
+        assert_eq!(after("--settings"), CLAUDE_CODE_SETTINGS);
         assert_eq!(after("--model"), "haiku");
         assert_eq!(after("--system-prompt"), "sys");
         assert!(args.contains(&"--no-session-persistence"));

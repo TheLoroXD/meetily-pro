@@ -1,7 +1,6 @@
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-use std::collections::HashMap;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
 
@@ -14,21 +13,11 @@ const STORE_KEY: &str = "settings";
 #[serde(default)]
 pub struct AssistantSettings {
     pub enabled: bool,
-    pub cloud_consent: HashMap<String, bool>,
 }
 
 impl Default for AssistantSettings {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            cloud_consent: HashMap::new(),
-        }
-    }
-}
-
-impl AssistantSettings {
-    pub fn has_cloud_consent(&self, provider: &str) -> bool {
-        self.cloud_consent.get(provider).copied().unwrap_or(false)
+        Self { enabled: true }
     }
 }
 

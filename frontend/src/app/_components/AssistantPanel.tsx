@@ -1,16 +1,15 @@
 'use client';
 
 import { memo, useEffect, useState } from 'react';
-import { Copy, Pin, PinOff, Pause, Play, RefreshCw, Sparkles, X, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Pause, Play, RefreshCw, Sparkles, ChevronRight, ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { useLiveAssistant } from '@/hooks/useLiveAssistant';
 import { catalogLabel } from '@/lib/model-catalog';
-import { KIND_META, describeAge, formatClock, hasCloudConsent, sortSuggestions, withCloudConsent, type AssistantSettings, type Suggestion } from '@/lib/live-assistant';
+import { describeAge, sortSuggestions, suggestionQuestion } from '@/lib/live-assistant';
 import { assistantService } from '@/services/assistantService';
-import { ChatInput, ChatThread, ClockLink } from '@/components/AssistantChat';
-import { AssistantConsentDialog } from '@/components/AssistantConsentDialog';
-import { toast } from 'sonner';
+import { ChatInput, ChatThread } from '@/components/AssistantChat';
+import { SuggestionCard } from '@/components/SuggestionCard';
 
 interface AssistantPanelProps {
   open: boolean;
@@ -53,51 +52,15 @@ function NextTickBar({ initial, generating, local }: { initial: number; generati
   );
 }
 
-function SuggestionCard({ item, onPin, onDismiss, onAsk }: { item: Suggestion; onPin: (pinned: boolean) => void; onDismiss: () => void; onAsk?: () => void }) {
-  const meta = KIND_META[item.kind];
-  return (
-    <div className={`rounded-lg border p-3 text-sm ${item.pinned ? 'border-blue-300 bg-blue-50/40' : 'border-gray-200 bg-white'}`} title={item.why || undefined}>
-      <div className="flex items-center justify-between gap-2 mb-1">
-        <div className="flex items-center gap-2">
-          <span className={`text-[11px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded ${meta.badge}`}>{meta.label}</span>
-          <ClockLink seconds={item.at_seconds} label={formatClock(item.at_seconds)} className="text-[11px] text-gray-500 hover:text-blue-600" />
-        </div>
-        <div className="flex items-center gap-0.5">
-          <button type="button" className="p-1 text-gray-400 hover:text-gray-700" title="Copy" onClick={() => { navigator.clipboard?.writeText(item.text); toast.success('Copied'); }}>
-            <Copy size={14} />
-          </button>
-          <button type="button" className="p-1 text-gray-400 hover:text-blue-600" title={item.pinned ? 'Unpin' : 'Pin'} onClick={() => onPin(!item.pinned)}>
-            {item.pinned ? <PinOff size={14} /> : <Pin size={14} />}
-          </button>
-          <button type="button" className="p-1 text-gray-400 hover:text-red-600" title="Dismiss" onClick={onDismiss}>
-            <X size={14} />
-          </button>
-        </div>
-      </div>
-      <button
-        type="button"
-        className="block w-full text-left text-gray-800 leading-snug enabled:hover:text-blue-700 disabled:cursor-default"
-        onClick={onAsk}
-        disabled={!onAsk}
-        title={onAsk ? 'Ask the assistant about this' : undefined}
-      >
-        {item.text}
-      </button>
-      {item.why && <p className="text-xs text-gray-500 mt-1">{item.why}</p>}
-    </div>
-  );
-}
-
 export const AssistantPanel = memo(function AssistantPanel({ open, isRecording, onToggle }: AssistantPanelProps) {
-  const { state, pin, dismiss, refresh, setPaused, ask, start } = useLiveAssistant();
+  const { state, pin, dismiss, refresh, setPaused, ask, compact, start } = useLiveAssistant();
   const suggestions = state.suggestions;
-  const [settings, setSettings] = useState<AssistantSettings | null>(null);
-  const [consentFor, setConsentFor] = useState<string | null>(null);
+  const [enabled, setEnabled] = useState<boolean | null>(null);
   const [, setClock] = useState(0);
 
   useEffect(() => {
     if (!open) return;
-    assistantService.getSettings().then(setSettings).catch(() => setSettings(null));
+    assistantService.getSettings().then((settings) => setEnabled(settings.enabled)).catch(() => setEnabled(null));
   }, [open, state.active]);
 
   useEffect(() => {
@@ -107,7 +70,6 @@ export const AssistantPanel = memo(function AssistantPanel({ open, isRecording, 
   }, [open]);
 
   const openCount = suggestions.filter((item) => !item.dismissed).length;
-  const enabled = settings?.enabled ?? null;
 
   if (!open) {
     return (
@@ -129,29 +91,13 @@ export const AssistantPanel = memo(function AssistantPanel({ open, isRecording, 
   const paused = state.status === 'paused';
   const errored = state.status === 'error';
 
-  const needsConsent = state.active && state.is_cloud && settings !== null && !hasCloudConsent(settings, state.provider);
-
-  const confirmConsent = async (provider: string) => {
-    setConsentFor(null);
-    if (!settings) return;
-    const next = withCloudConsent(settings, provider);
-    try {
-      await assistantService.saveSettings(next);
-      setSettings(next);
-      if (paused || errored) await setPaused(false);
-    } catch (error) {
-      toast.error('Could not save assistant settings', { description: String(error) });
-    }
-  };
-
-  const canChat = state.active && !state.chat_pending && !needsConsent;
+  const canChat = state.active && !state.chat_pending;
 
   let emptyMessage: string | null = null;
   if (visible.length === 0) {
     if (!state.active && enabled === false) emptyMessage = 'Turn on the live assistant in Settings, Models.';
     else if (!state.active && !isRecording) emptyMessage = 'Suggestions appear here while you record.';
     else if (!state.active) emptyMessage = 'Assistant is not running for this recording.';
-    else if (needsConsent) emptyMessage = 'Waiting for permission to send the transcript.';
     else if (paused) emptyMessage = 'Paused. Press play to resume suggestions.';
     else if (errored) emptyMessage = 'Suggestions stopped after an error.';
     else emptyMessage = generating ? 'Reading the conversation...' : 'Listening. Suggestions arrive after enough has been said.';
@@ -169,7 +115,7 @@ export const AssistantPanel = memo(function AssistantPanel({ open, isRecording, 
             )}
           </div>
           <div className="flex items-center gap-1">
-            {state.active && !needsConsent && (
+            {state.active && (
               <>
                 <Button variant="ghost" size="sm" className="h-7 px-2" onClick={refresh} title="Suggest now" disabled={generating}>
                   <RefreshCw size={14} className={generating ? 'animate-spin' : undefined} />
@@ -187,19 +133,13 @@ export const AssistantPanel = memo(function AssistantPanel({ open, isRecording, 
         {state.active && (
           <div className="flex items-center justify-between text-[11px]">
             <span className={`px-1.5 py-0.5 rounded ${state.is_cloud ? 'bg-orange-50 text-orange-700' : 'bg-green-50 text-green-700'}`} title={`${state.provider} / ${state.model}`}>
-              {needsConsent ? 'Needs permission' : state.is_cloud ? `Sending to ${catalogLabel(state.provider)}` : 'On device'}
+              {state.is_cloud ? `Sending to ${catalogLabel(state.provider)}` : 'On device'}
             </span>
             <span className={age.stale ? 'text-orange-600' : 'text-gray-500'}>{age.label}</span>
           </div>
         )}
-        {state.active && !paused && !errored && !needsConsent && <NextTickBar initial={state.progress} generating={generating} local={!state.is_cloud} />}
-        {needsConsent && (
-          <div className="text-xs text-orange-800 bg-orange-50 rounded p-2 flex items-start justify-between gap-2">
-            <span>{catalogLabel(state.provider)} is a cloud provider. Allow sending the live transcript to get suggestions.</span>
-            <button type="button" className="underline shrink-0" onClick={() => setConsentFor(state.provider)}>Allow</button>
-          </div>
-        )}
-        {state.error && !needsConsent && (
+        {state.active && !paused && !errored && <NextTickBar initial={state.progress} generating={generating} local={!state.is_cloud} />}
+        {state.error && (
           <div className="text-xs text-red-700 bg-red-50 rounded p-2 flex items-start justify-between gap-2">
             <span>{state.error}</span>
             <button type="button" className="underline shrink-0" onClick={refresh}>Retry</button>
@@ -221,7 +161,7 @@ export const AssistantPanel = memo(function AssistantPanel({ open, isRecording, 
               item={item}
               onPin={(pinned) => pin(item.id, pinned)}
               onDismiss={() => dismiss(item.id)}
-              onAsk={canChat ? () => ask(item.text) : undefined}
+              onAsk={canChat ? () => ask(suggestionQuestion(item)) : undefined}
             />
           ))
         )}
@@ -231,8 +171,7 @@ export const AssistantPanel = memo(function AssistantPanel({ open, isRecording, 
         pending={state.chat_pending}
         emptyHint={state.active ? 'Ask anything about the conversation. Click a suggestion to ask about it.' : 'Chat works while a recording is running.'}
       />
-      <ChatInput placeholder={state.active ? 'Ask the assistant' : 'Start recording to chat'} disabled={!state.active} canSend={canChat} onSend={ask} />
-      <AssistantConsentDialog provider={consentFor} onConfirm={confirmConsent} onCancel={() => setConsentFor(null)} />
+      <ChatInput placeholder={state.active ? 'Ask the assistant' : 'Start recording to chat'} disabled={!state.active} canSend={canChat} onSend={ask} context={state.chat_context} onCompact={compact} />
     </div>
   );
 });

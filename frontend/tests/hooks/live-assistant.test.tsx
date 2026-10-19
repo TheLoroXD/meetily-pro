@@ -64,7 +64,7 @@ function emit(name: string, payload: unknown) {
 }
 const idle = (): LiveAssistantState => ({
   active: false, status: 'idle', provider: '', model: '', is_cloud: false, last_tick_at: null,
-  error: null, tick_no: 0, progress: 0, state: '', suggestions: [], chat: [], chat_pending: false,
+  error: null, tick_no: 0, progress: 0, state: '', suggestions: [], chat: [], chat_pending: false, chat_context: null,
 });
 
 beforeEach(() => {

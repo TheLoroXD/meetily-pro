@@ -5,13 +5,13 @@ use tauri::{AppHandle, Runtime};
 use tokio_util::sync::CancellationToken;
 
 use super::prompt::{self, ChatMessage, ChatRole};
-use super::service::{self, RequestPlan};
+use super::service::{self, truncate_to_tokens, ChatContext, RequestPlan};
 use crate::audio::recording_saver::TranscriptSegment;
 use crate::database::repositories::chat::MeetingChatRepository;
 use crate::database::repositories::meeting::MeetingsRepository;
 use crate::database::repositories::summary::SummaryProcessesRepository;
 use crate::summary::llm_client::LLMProvider;
-use crate::summary::processor::{clean_llm_markdown_detailed, rough_token_count};
+use crate::summary::processor::clean_llm_markdown_detailed;
 
 const LARGE_CONTEXT_INPUT_TOKENS: usize = 24000;
 const ANSWER_TOKENS: u32 = 1000;
@@ -38,19 +38,80 @@ pub fn is_answering(meeting_id: &str) -> bool {
     IN_FLIGHT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).contains(meeting_id)
 }
 
+#[derive(serde::Serialize)]
+pub struct MeetingChat {
+    messages: Vec<ChatMessage>,
+    answering: bool,
+    context: Option<ChatContext>,
+}
+
 fn message(role: ChatRole, text: String, error: bool) -> ChatMessage {
     ChatMessage { id: String::new(), role, text, error }
 }
 
-pub async fn ask<R: Runtime>(app: &AppHandle<R>, meeting_id: &str, question: String) -> Result<Vec<ChatMessage>, String> {
-    let question = service::checked_question(question)?;
-    let _claim = InFlight::claim(meeting_id).ok_or_else(|| "Wait for the current answer".to_string())?;
+pub async fn load<R: Runtime>(app: &AppHandle<R>, meeting_id: &str) -> Result<MeetingChat, String> {
+    let answering = is_answering(meeting_id);
+    let budget = match service::resolve_request(app).await {
+        Ok(plan) => Some(budget(&plan).await),
+        Err(_) => None,
+    };
+    respond(app, meeting_id, answering, budget).await
+}
+
+async fn respond<R: Runtime>(app: &AppHandle<R>, meeting_id: &str, answering: bool, budget: Option<usize>) -> Result<MeetingChat, String> {
     let pool = service::db_pool(app)?;
-    MeetingChatRepository::append(&pool, meeting_id, &[message(ChatRole::User, question, false)])
+    let messages = MeetingChatRepository::get_for_meeting(&pool, meeting_id)
         .await
         .map_err(|e| e.to_string())?;
-    let reply = match answer(app, meeting_id).await {
-        Ok(text) => message(ChatRole::Assistant, text, false),
+    let context = budget.map(|budget| service::chat_context(&messages, budget));
+    Ok(MeetingChat { messages, answering, context })
+}
+
+pub async fn ask<R: Runtime>(app: &AppHandle<R>, meeting_id: &str, question: String) -> Result<MeetingChat, String> {
+    let question = service::checked_question(question)?;
+    turn(app, meeting_id, Some(question), ChatRole::Assistant, |plan, budget| answer(app, meeting_id, plan, budget)).await
+}
+
+pub async fn compact<R: Runtime>(app: &AppHandle<R>, meeting_id: &str) -> Result<MeetingChat, String> {
+    turn(app, meeting_id, None, ChatRole::Summary, |plan, budget| async move {
+        let pool = service::db_pool(app)?;
+        let chat = MeetingChatRepository::get_for_meeting(&pool, meeting_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        service::compact_chat(app, &plan, &chat, budget, &CancellationToken::new()).await
+    })
+    .await
+}
+
+async fn turn<R, F, Fut>(
+    app: &AppHandle<R>,
+    meeting_id: &str,
+    question: Option<String>,
+    role: ChatRole,
+    work: F,
+) -> Result<MeetingChat, String>
+where
+    R: Runtime,
+    F: FnOnce(RequestPlan, usize) -> Fut,
+    Fut: std::future::Future<Output = Result<String, String>>,
+{
+    let claim = InFlight::claim(meeting_id).ok_or_else(|| "Wait for the current answer".to_string())?;
+    let pool = service::db_pool(app)?;
+    if let Some(question) = question {
+        MeetingChatRepository::append(&pool, meeting_id, &[message(ChatRole::User, question, false)])
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    let (result, budget) = match service::resolve_request(app).await {
+        Ok(plan) => {
+            let budget = budget(&plan).await;
+            (work(plan, budget).await, Some(budget))
+        }
+        Err(error) => (Err(error), None),
+    };
+    let reply = match result {
+        Ok(text) => message(role, text, false),
+        Err(error) if role == ChatRole::Summary => return Err(service::short_error(&error)),
         Err(error) => {
             let error = service::short_error(&error);
             warn!("Meeting chat failed: {}", error);
@@ -60,9 +121,8 @@ pub async fn ask<R: Runtime>(app: &AppHandle<R>, meeting_id: &str, question: Str
     MeetingChatRepository::append(&pool, meeting_id, &[reply])
         .await
         .map_err(|e| e.to_string())?;
-    MeetingChatRepository::get_for_meeting(&pool, meeting_id)
-        .await
-        .map_err(|e| e.to_string())
+    drop(claim);
+    respond(app, meeting_id, is_answering(meeting_id), budget).await
 }
 
 async fn budget(plan: &RequestPlan) -> usize {
@@ -87,16 +147,7 @@ fn summary_markdown(result: Option<String>) -> String {
         .unwrap_or_default()
 }
 
-fn truncate_to_tokens(text: &str, tokens: usize) -> String {
-    if rough_token_count(text) <= tokens {
-        return text.to_string();
-    }
-    let chars = text.chars().count() * tokens / rough_token_count(text).max(1);
-    text.chars().take(chars).collect()
-}
-
-async fn answer<R: Runtime>(app: &AppHandle<R>, meeting_id: &str) -> Result<String, String> {
-    let plan = service::resolve_request(app).await?;
+async fn answer<R: Runtime>(app: &AppHandle<R>, meeting_id: &str, plan: RequestPlan, budget: usize) -> Result<String, String> {
     let pool = service::db_pool(app)?;
     let meeting = MeetingsRepository::get_meeting_metadata(&pool, meeting_id)
         .await
@@ -134,7 +185,6 @@ async fn answer<R: Runtime>(app: &AppHandle<R>, meeting_id: &str) -> Result<Stri
         .await
         .map_err(|e| e.to_string())?;
 
-    let budget = budget(&plan).await;
     let request = service::ChatRequest {
         system_prompt: prompt::MEETING_CHAT_SYSTEM_PROMPT,
         prefix: prompt::build_meeting_prefix(&meeting.title, &truncate_to_tokens(&summary, budget / 4)),
@@ -157,15 +207,6 @@ mod tests {
         assert_eq!(summary_markdown(Some(r#"{"summary_json":[]}"#.to_string())), "");
         assert_eq!(summary_markdown(Some("not json".to_string())), "");
         assert_eq!(summary_markdown(None), "");
-    }
-
-    #[test]
-    fn truncation_keeps_short_text_and_cuts_long_text() {
-        assert_eq!(truncate_to_tokens("short", 100), "short");
-        let long = "word ".repeat(2000);
-        let cut = truncate_to_tokens(&long, 100);
-        assert!(rough_token_count(&cut) <= 110);
-        assert!(long.starts_with(&cut));
     }
 
     #[test]
