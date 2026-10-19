@@ -1,30 +1,37 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { assistantService } from '@/services/assistantService';
-import type { ChatMessage } from '@/lib/live-assistant';
+import type { ChatContext, ChatMessage, MeetingChat } from '@/lib/live-assistant';
 
 const ANSWER_POLL_MS = 2000;
 
 export function useMeetingChat(meetingId: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [context, setContext] = useState<ChatContext | null>(null);
   const [asking, setAsking] = useState(false);
   const [answeringElsewhere, setAnsweringElsewhere] = useState(false);
   const currentMeeting = useRef(meetingId);
   currentMeeting.current = meetingId;
 
+  const apply = useCallback((chat: MeetingChat) => {
+    setMessages(chat.messages);
+    setContext(chat.context);
+  }, []);
+
   const load = useCallback(async (id: string) => {
     try {
       const chat = await assistantService.getMeetingChat(id);
       if (currentMeeting.current !== id) return;
-      setMessages(chat.messages);
+      apply(chat);
       setAnsweringElsewhere(chat.answering);
     } catch (error) {
       console.warn('Failed to load meeting chat:', error);
     }
-  }, []);
+  }, [apply]);
 
   useEffect(() => {
     setMessages([]);
+    setContext(null);
     setAsking(false);
     setAnsweringElsewhere(false);
     void load(meetingId);
@@ -36,25 +43,34 @@ export function useMeetingChat(meetingId: string) {
     return () => clearInterval(timer);
   }, [answeringElsewhere, meetingId, load]);
 
-  const ask = useCallback(async (question: string): Promise<boolean> => {
+  const run = useCallback(async (request: () => Promise<MeetingChat>, failure: string, pending?: ChatMessage): Promise<boolean> => {
     const id = meetingId;
-    const pending: ChatMessage = { id: 'pending', role: 'user', text: question, error: false };
-    setMessages((previous) => [...previous, pending]);
+    if (pending) setMessages((previous) => [...previous, pending]);
     setAsking(true);
     try {
-      const chat = await assistantService.askAboutMeeting(id, question);
-      if (currentMeeting.current === id) setMessages(chat);
+      const chat = await request();
+      if (currentMeeting.current === id) apply(chat);
       return true;
     } catch (error) {
       if (currentMeeting.current === id) {
-        setMessages((previous) => previous.filter((message) => message !== pending));
-        toast.error('Could not send the question', { description: String(error) });
+        if (pending) setMessages((previous) => previous.filter((message) => message !== pending));
+        toast.error(failure, { description: String(error) });
       }
       return false;
     } finally {
       if (currentMeeting.current === id) setAsking(false);
     }
-  }, [meetingId]);
+  }, [meetingId, apply]);
 
-  return { messages, answering: asking || answeringElsewhere, ask };
+  const ask = useCallback((question: string) => run(
+    () => assistantService.askAboutMeeting(meetingId, question),
+    'Could not send the question',
+    { id: 'pending', role: 'user', text: question, error: false },
+  ), [meetingId, run]);
+
+  const compact = useCallback(async () => {
+    await run(() => assistantService.compactMeetingChat(meetingId), 'Could not compact the chat');
+  }, [meetingId, run]);
+
+  return { messages, context, answering: asking || answeringElsewhere, ask, compact };
 }

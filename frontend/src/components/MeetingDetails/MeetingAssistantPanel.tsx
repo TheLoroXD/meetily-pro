@@ -15,7 +15,7 @@ interface MeetingAssistantPanelProps {
 }
 
 export function MeetingAssistantPanel({ meetingId, hasTranscript, summary }: MeetingAssistantPanelProps) {
-  const { messages, answering, ask } = useMeetingChat(meetingId);
+  const { messages, context, answering, ask, compact } = useMeetingChat(meetingId);
   const { suggestions, dismiss } = useMeetingSuggestions(meetingId);
   const canAsk = hasTranscript && !answering;
 
@@ -39,7 +39,7 @@ export function MeetingAssistantPanel({ meetingId, hasTranscript, summary }: Mee
         )}
         emptyHint={hasTranscript ? `Ask anything about this meeting, for example who owns what or a follow-up email.${suggestions.length > 0 ? ' Click a suggestion to look into it.' : ''}` : 'Questions work once the meeting has a transcript.'}
       />
-      <ChatInput placeholder="Ask about this meeting" disabled={!hasTranscript} canSend={canAsk} onSend={ask} />
+      <ChatInput placeholder="Ask about this meeting" disabled={!hasTranscript} canSend={canAsk} onSend={ask} context={context} onCompact={compact} />
     </div>
   );
 }

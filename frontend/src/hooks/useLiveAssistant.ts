@@ -17,6 +17,7 @@ const EMPTY_STATE: LiveAssistantState = {
   suggestions: [],
   chat: [],
   chat_pending: false,
+  chat_context: null,
 };
 
 export function useLiveAssistant() {
@@ -124,6 +125,14 @@ export function useLiveAssistant() {
     }
   }, []);
 
+  const compact = useCallback(async () => {
+    try {
+      await assistantService.compact();
+    } catch (error) {
+      toast.error('Could not compact the chat', { description: String(error) });
+    }
+  }, []);
+
   const start = useCallback(async () => {
     try {
       await assistantService.start();
@@ -133,5 +142,5 @@ export function useLiveAssistant() {
     }
   }, [resync]);
 
-  return { state, pin, dismiss, refresh, setPaused, ask, start };
+  return { state, pin, dismiss, refresh, setPaused, ask, compact, start };
 }

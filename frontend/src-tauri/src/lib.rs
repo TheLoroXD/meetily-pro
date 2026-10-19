@@ -675,6 +675,7 @@ pub fn run() {
             assistant::commands::pause_live_assistant,
             assistant::commands::update_live_suggestion,
             assistant::commands::ask_live_assistant,
+            assistant::commands::compact_live_assistant,
             assistant::commands::get_live_assistant_state,
             assistant::commands::api_get_assistant_settings,
             assistant::commands::api_save_assistant_settings,
@@ -683,6 +684,7 @@ pub fn run() {
             assistant::commands::api_save_meeting_assistant,
             assistant::commands::api_get_meeting_chat,
             assistant::commands::api_ask_meeting_assistant,
+            assistant::commands::api_compact_meeting_chat,
             assistant::commands::api_import_assistant_snapshot,
             // Playback device detection (Bluetooth warning)
             audio::recording_commands::get_active_audio_output,

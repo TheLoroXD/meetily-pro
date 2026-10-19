@@ -14,9 +14,20 @@ export interface Suggestion {
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'summary';
   text: string;
   error: boolean;
+}
+
+export interface ChatContext {
+  used: number;
+  limit: number;
+}
+
+export const COMPACT_FROM_PERCENT = 50;
+
+export function contextPercent(context: ChatContext): number {
+  return context.limit > 0 ? Math.round((context.used / context.limit) * 100) : 0;
 }
 
 export type AssistantStatus = 'idle' | 'waiting' | 'generating' | 'paused' | 'error';
@@ -35,11 +46,13 @@ export interface LiveAssistantState {
   suggestions: Suggestion[];
   chat: ChatMessage[];
   chat_pending: boolean;
+  chat_context: ChatContext | null;
 }
 
 export interface MeetingChat {
   messages: ChatMessage[];
   answering: boolean;
+  context: ChatContext | null;
 }
 
 export interface AssistantSettings {

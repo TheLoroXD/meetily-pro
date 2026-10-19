@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   appendPinnedSection,
   buildPinnedPromptSection,
+  contextPercent,
   describeAge,
   formatClock,
   sortSuggestions,
@@ -75,5 +76,12 @@ describe('live assistant helpers', () => {
     expect(appendPinnedSection('', section)).toBe(section);
     expect(appendPinnedSection('Focus on risks', section)).toBe(`Focus on risks\n\n${section}`);
     expect(appendPinnedSection('Focus on risks', '')).toBe('Focus on risks');
+  });
+
+  test('context percent rounds and survives an unknown limit', () => {
+    expect(contextPercent({ used: 0, limit: 8000 })).toBe(0);
+    expect(contextPercent({ used: 4100, limit: 8000 })).toBe(51);
+    expect(contextPercent({ used: 12000, limit: 8000 })).toBe(150);
+    expect(contextPercent({ used: 50, limit: 0 })).toBe(0);
   });
 });

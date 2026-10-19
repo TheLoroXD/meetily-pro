@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import type { AssistantSettings, ChatMessage, LiveAssistantState, MeetingChat, Suggestion } from '@/lib/live-assistant';
+import type { AssistantSettings, LiveAssistantState, MeetingChat, Suggestion } from '@/lib/live-assistant';
 
 export interface AssistantErrorEvent {
   message: string | null;
@@ -13,6 +13,10 @@ export class AssistantService {
 
   async ask(question: string): Promise<void> {
     return invoke('ask_live_assistant', { question });
+  }
+
+  async compact(): Promise<void> {
+    return invoke('compact_live_assistant');
   }
 
   async refresh(): Promise<void> {
@@ -63,8 +67,12 @@ export class AssistantService {
     return invoke<MeetingChat>('api_get_meeting_chat', { meetingId });
   }
 
-  async askAboutMeeting(meetingId: string, question: string): Promise<ChatMessage[]> {
-    return invoke<ChatMessage[]>('api_ask_meeting_assistant', { meetingId, question });
+  async askAboutMeeting(meetingId: string, question: string): Promise<MeetingChat> {
+    return invoke<MeetingChat>('api_ask_meeting_assistant', { meetingId, question });
+  }
+
+  async compactMeetingChat(meetingId: string): Promise<MeetingChat> {
+    return invoke<MeetingChat>('api_compact_meeting_chat', { meetingId });
   }
 
   async onStatus(callback: (state: LiveAssistantState) => void): Promise<UnlistenFn> {

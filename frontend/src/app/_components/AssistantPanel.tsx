@@ -53,7 +53,7 @@ function NextTickBar({ initial, generating, local }: { initial: number; generati
 }
 
 export const AssistantPanel = memo(function AssistantPanel({ open, isRecording, onToggle }: AssistantPanelProps) {
-  const { state, pin, dismiss, refresh, setPaused, ask, start } = useLiveAssistant();
+  const { state, pin, dismiss, refresh, setPaused, ask, compact, start } = useLiveAssistant();
   const suggestions = state.suggestions;
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [, setClock] = useState(0);
@@ -171,7 +171,7 @@ export const AssistantPanel = memo(function AssistantPanel({ open, isRecording, 
         pending={state.chat_pending}
         emptyHint={state.active ? 'Ask anything about the conversation. Click a suggestion to ask about it.' : 'Chat works while a recording is running.'}
       />
-      <ChatInput placeholder={state.active ? 'Ask the assistant' : 'Start recording to chat'} disabled={!state.active} canSend={canChat} onSend={ask} />
+      <ChatInput placeholder={state.active ? 'Ask the assistant' : 'Start recording to chat'} disabled={!state.active} canSend={canChat} onSend={ask} context={state.chat_context} onCompact={compact} />
     </div>
   );
 });
