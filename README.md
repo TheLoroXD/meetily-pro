@@ -32,6 +32,10 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 
 ## What's new
 
+### v1.6.1
+
+- With Claude Code as the AI model, the assistant chat can look up answers in Notion, Linear, Microsoft 365, Confluence and Jira while you talk. It only reads; turn it off in Settings, Models.
+
 ### v1.6.0
 
 - When a meeting ends, the assistant posts a short summary right into the chat; just keep asking if you want more detail.
@@ -45,12 +49,6 @@ The macOS app is ad-hoc signed, not notarized. After dragging it to Applications
 - Live tips follow what you ask in the chat and the whole meeting so far, and arrive one to three at a time.
 - Questions and tips from a call stay on the meeting page until you close them.
 - Pick a model with the Use button next to each ready AI service.
-
-### v1.4.0
-
-- Use your Claude Code or Codex sign-in as the AI model, no API key needed.
-- The live assistant now brings useful facts and tips, not only questions.
-- Change the transcription language during a call (Whisper).
 
 ## Features
 
