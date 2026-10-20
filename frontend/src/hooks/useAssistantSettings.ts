@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import { assistantService } from '@/services/assistantService';
 import type { AssistantSettings } from '@/lib/live-assistant';
 
-const DEFAULT_SETTINGS: AssistantSettings = { enabled: true };
+const DEFAULT_SETTINGS: AssistantSettings = { enabled: true, lookup: true };
 
 export function useAssistantSettings() {
   const [settings, setSettings] = useState<AssistantSettings>(DEFAULT_SETTINGS);

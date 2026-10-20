@@ -679,7 +679,7 @@ async fn run_tick<R: Runtime>(
     let window = prompt::select_window(segments, window_budget);
     let user_prompt = prompt::build_user_prompt(prefix, window, on_demand);
     let through_seq = window.last().map(|s| s.sequence_id);
-    let options = CompletionOptions { json_mode: true, max_tokens: Some(OUTPUT_TOKENS), json_schema: Some(prompt::SUGGESTIONS_SCHEMA) };
+    let options = CompletionOptions { json_mode: true, max_tokens: Some(OUTPUT_TOKENS), json_schema: Some(prompt::SUGGESTIONS_SCHEMA), lookup: false };
     let content = call_model(app, plan, prompt::SYSTEM_PROMPT, &user_prompt, token, options).await?;
     let output = prompt::parse_model_output(&content).inspect_err(|_| {
         warn!("Unreadable assistant output ({} chars)", content.len());
@@ -821,9 +821,15 @@ pub(super) async fn answer_question<R: Runtime>(
         .max(200);
     let window = prompt::select_window(request.segments, window_budget);
     let user_prompt = prompt::build_chat_prompt(request.prefix, window, &history);
-    info!("Assistant chat via {}/{}", plan.provider_label, plan.model);
-    let options = CompletionOptions { json_mode: false, max_tokens: Some(request.max_tokens), json_schema: None };
-    let content = call_model(app, plan, request.system_prompt, &user_prompt, token, options).await?;
+    let lookup = settings::load(app).lookup && plan.provider_settings.provider == LLMProvider::ClaudeCode;
+    info!("Assistant chat via {}/{} (lookup: {})", plan.provider_label, plan.model, lookup);
+    let system_prompt = if lookup {
+        format!("{}{}", request.system_prompt, prompt::LOOKUP_INSTRUCTIONS)
+    } else {
+        request.system_prompt.to_string()
+    };
+    let options = CompletionOptions { json_mode: false, max_tokens: Some(request.max_tokens), json_schema: None, lookup };
+    let content = call_model(app, plan, &system_prompt, &user_prompt, token, options).await?;
     visible_chat_answer(&content, request.segments)
 }
 
@@ -905,7 +911,7 @@ pub(super) async fn compact_chat<R: Runtime>(
     let words = (chat_budget(input_budget) / 4).clamp(60, 300);
     let user_prompt = format!("Chat:\n{}\nWrite the summary in under {} words.", prompt::format_chat(&kept), words);
     info!("Compacting assistant chat via {}/{}", plan.provider_label, plan.model);
-    let options = CompletionOptions { json_mode: false, max_tokens: Some(COMPACT_TOKENS), json_schema: None };
+    let options = CompletionOptions { json_mode: false, max_tokens: Some(COMPACT_TOKENS), json_schema: None, lookup: false };
     let content = call_model(app, plan, prompt::COMPACT_SYSTEM_PROMPT, &user_prompt, token, options).await?;
     let cleaned = clean_llm_markdown_detailed(&content);
     require_visible_markdown("Chat summary", &cleaned)?;

@@ -57,6 +57,7 @@ export interface MeetingChat {
 
 export interface AssistantSettings {
   enabled: boolean;
+  lookup: boolean;
 }
 
 export const KIND_META: Record<SuggestionKind, { label: string; badge: string; text: string }> = {
