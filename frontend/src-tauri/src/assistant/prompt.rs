@@ -65,6 +65,14 @@ Write one summary of the whole chat:
 - Drop greetings, repetition and failed attempts.
 - Reply in plain text, in the language of the chat."#;
 
+pub const LOOKUP_INSTRUCTIONS: &str = r#"
+
+You can also look things up in the user's work tools (Notion, Linear, Microsoft 365, Confluence and Jira) with read-only tools.
+- Use them when the answer depends on facts the transcript does not hold, such as a ticket's status, owner or scope, a documented decision, or a number.
+- Search narrowly and stop once you have the answer. The user is waiting in a live call.
+- Say where each fact came from and include its link.
+- If the tools do not have it, say so instead of guessing."#;
+
 pub const CHAT_LANGUAGE: &str = "the language of the user's latest chat message";
 
 const ON_DEMAND_REQUEST: &str = "\nThe user asked for suggestions right now. Return 1 to 3 new items, cited to the transcript, even if the conversation has not moved on much.\n";

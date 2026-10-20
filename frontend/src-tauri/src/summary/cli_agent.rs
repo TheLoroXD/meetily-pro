@@ -16,6 +16,31 @@ const SHELL_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_MODEL: &str = "default";
 const CLAUDE_CODE_MODELS: [&str; 3] = ["sonnet", "opus", "haiku"];
 const CLAUDE_CODE_SETTINGS: &str = r#"{"disableAllHooks":true}"#;
+// Lookups keep only ToolSearch among the built-in tools: the user's MCP tools load deferred
+// and are unreachable without it. dontAsk denies every tool not listed here, so writes stay off.
+const CLAUDE_CODE_LOOKUP_TOOLS: &str = "ToolSearch";
+const CLAUDE_CODE_LOOKUP_ALLOWED: &str = concat!(
+    "mcp__claude_ai_Notion__notion-search,mcp__claude_ai_Notion__notion-fetch,",
+    "mcp__claude_ai_Notion__notion-query-meeting-notes,mcp__claude_ai_Notion__notion-get-comments,",
+    "mcp__plugin_Notion_notion__notion-search,mcp__plugin_Notion_notion__notion-fetch,",
+    "mcp__plugin_Notion_notion__notion-query-meeting-notes,mcp__plugin_Notion_notion__notion-get-comments,",
+    "mcp__claude_ai_Linear__get_issue,mcp__claude_ai_Linear__list_issues,mcp__claude_ai_Linear__list_comments,",
+    "mcp__claude_ai_Linear__get_project,mcp__claude_ai_Linear__list_projects,mcp__claude_ai_Linear__get_document,",
+    "mcp__claude_ai_Linear__list_documents,mcp__claude_ai_Linear__list_cycles,mcp__claude_ai_Linear__list_users,",
+    "mcp__claude_ai_Linear__get_user,mcp__claude_ai_Linear__list_teams,mcp__claude_ai_Linear__get_status_updates,",
+    "mcp__plugin_engineering_linear__get_issue,mcp__plugin_engineering_linear__list_issues,",
+    "mcp__plugin_engineering_linear__list_comments,mcp__plugin_engineering_linear__get_project,",
+    "mcp__plugin_engineering_linear__list_projects,mcp__plugin_engineering_linear__get_document,",
+    "mcp__plugin_engineering_linear__list_documents,mcp__plugin_engineering_linear__list_cycles,",
+    "mcp__plugin_engineering_linear__list_users,mcp__plugin_engineering_linear__get_user,",
+    "mcp__plugin_engineering_linear__list_teams,mcp__plugin_engineering_linear__get_status_updates,",
+    "mcp__claude_ai_Microsoft_365__outlook_email_search,mcp__claude_ai_Microsoft_365__outlook_calendar_search,",
+    "mcp__claude_ai_Microsoft_365__chat_message_search,mcp__claude_ai_Microsoft_365__sharepoint_search,",
+    "mcp__claude_ai_Microsoft_365__read_resource,mcp__claude_ai_Microsoft_365__search_people,",
+    "mcp__claude_ai_Atlassian_Rovo__search,mcp__claude_ai_Atlassian_Rovo__fetch,",
+    "mcp__claude_ai_Atlassian_Rovo__getConfluencePage,mcp__claude_ai_Atlassian_Rovo__searchConfluenceUsingCql,",
+    "mcp__claude_ai_Atlassian_Rovo__getJiraIssue,mcp__claude_ai_Atlassian_Rovo__searchJiraIssuesUsingJql",
+);
 const CODEX_SCRUBBED_ENV: [&str; 2] = ["OPENAI_API_KEY", "CODEX_API_KEY"];
 const CODEX_DISABLED_FEATURES: [&str; 16] = [
     "shell_tool",
@@ -324,17 +349,23 @@ pub async fn status(agent: CliAgent) -> CliAgentStatus {
     }
 }
 
-fn claude_code_args<'a>(model: &'a str, system_prompt: &'a str, json_schema: Option<&'a str>) -> Vec<&'a str> {
+fn claude_code_args<'a>(model: &'a str, system_prompt: &'a str, json_schema: Option<&'a str>, lookup: bool) -> Vec<&'a str> {
     let mut args = vec![
         "-p",
         "--output-format",
         "json",
         "--tools",
-        "",
+        if lookup { CLAUDE_CODE_LOOKUP_TOOLS } else { "" },
         "--permission-mode",
         "dontAsk",
         "--no-session-persistence",
-        "--strict-mcp-config",
+    ];
+    if lookup {
+        args.extend(["--allowedTools", CLAUDE_CODE_LOOKUP_ALLOWED]);
+    } else {
+        args.push("--strict-mcp-config");
+    }
+    args.extend([
         "--setting-sources",
         "user",
         "--settings",
@@ -344,7 +375,7 @@ fn claude_code_args<'a>(model: &'a str, system_prompt: &'a str, json_schema: Opt
         model,
         "--system-prompt",
         system_prompt,
-    ];
+    ]);
     if let Some(schema) = json_schema {
         args.extend(["--json-schema", schema]);
     }
@@ -451,6 +482,7 @@ pub async fn complete(
     system_prompt: &str,
     user_prompt: &str,
     json_schema: Option<&str>,
+    lookup: bool,
     token: Option<&CancellationToken>,
 ) -> Result<String, String> {
     let env = login_env().await;
@@ -460,7 +492,7 @@ pub async fn complete(
     command.current_dir(workdir.path());
     let input = match agent {
         CliAgent::ClaudeCode => {
-            command.args(claude_code_args(model, system_prompt, json_schema));
+            command.args(claude_code_args(model, system_prompt, json_schema, lookup));
             user_prompt.to_string()
         }
         CliAgent::Codex => {
@@ -566,7 +598,7 @@ mod tests {
 
     #[test]
     fn claude_code_runs_with_user_auth_but_without_tools_sessions_or_hooks() {
-        let args = claude_code_args("haiku", "sys", None);
+        let args = claude_code_args("haiku", "sys", None, false);
         let after = |flag: &str| args[args.iter().position(|arg| *arg == flag).unwrap() + 1];
         assert_eq!(after("--tools"), "");
         assert_eq!(after("--setting-sources"), "user");
@@ -576,8 +608,29 @@ mod tests {
         assert!(args.contains(&"--no-session-persistence"));
         assert!(args.contains(&"--strict-mcp-config"));
         assert!(!args.contains(&"--json-schema"));
-        let with_schema = claude_code_args("haiku", "sys", Some("{}"));
+        assert!(!args.contains(&"--allowedTools"));
+        let with_schema = claude_code_args("haiku", "sys", Some("{}"), false);
         assert!(with_schema.windows(2).any(|pair| pair == ["--json-schema", "{}"]));
+    }
+
+    #[test]
+    fn claude_code_lookups_reach_only_read_only_work_tools() {
+        let args = claude_code_args("sonnet", "sys", None, true);
+        let after = |flag: &str| args[args.iter().position(|arg| *arg == flag).unwrap() + 1];
+        assert_eq!(after("--tools"), "ToolSearch");
+        assert_eq!(after("--permission-mode"), "dontAsk");
+        assert!(!args.contains(&"--strict-mcp-config"));
+        let allowed: Vec<&str> = after("--allowedTools").split(',').collect();
+        assert!(allowed.contains(&"mcp__claude_ai_Linear__get_issue"));
+        assert!(allowed.contains(&"mcp__claude_ai_Notion__notion-search"));
+        assert!(allowed.iter().all(|tool| tool.starts_with("mcp__") && !tool.contains('*')));
+        for write in ["save", "create", "update", "delete", "send", "edit", "transition", "add"] {
+            assert!(
+                allowed.iter().all(|tool| !tool.rsplit("__").next().unwrap().to_lowercase().starts_with(write)),
+                "{} tool allowed",
+                write
+            );
+        }
     }
 
     #[test]

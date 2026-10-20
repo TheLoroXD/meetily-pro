@@ -13,11 +13,12 @@ const STORE_KEY: &str = "settings";
 #[serde(default)]
 pub struct AssistantSettings {
     pub enabled: bool,
+    pub lookup: bool,
 }
 
 impl Default for AssistantSettings {
     fn default() -> Self {
-        Self { enabled: true }
+        Self { enabled: true, lookup: true }
     }
 }
 

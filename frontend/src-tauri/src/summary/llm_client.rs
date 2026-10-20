@@ -52,6 +52,7 @@ pub struct CompletionOptions {
     pub json_mode: bool,
     pub max_tokens: Option<u32>,
     pub json_schema: Option<&'static str>,
+    pub lookup: bool,
 }
 
 fn supports_json_mode(provider: &LLMProvider) -> bool {
@@ -364,7 +365,7 @@ pub(crate) async fn complete(
     }
 
     if let Some(agent) = CliAgent::of(provider) {
-        return cli_agent::complete(agent, model_name, system_prompt, user_prompt, options.json_schema, cancellation_token)
+        return cli_agent::complete(agent, model_name, system_prompt, user_prompt, options.json_schema, options.lookup, cancellation_token)
             .await
             .map(|content| LlmCompletion {
                 content,
@@ -665,7 +666,7 @@ mod tests {
 
     #[test]
     fn output_cap_applies_only_to_self_hosted_models() {
-        let options = CompletionOptions { json_mode: true, max_tokens: Some(64), json_schema: None };
+        let options = CompletionOptions { json_mode: true, max_tokens: Some(64), json_schema: None, lookup: false };
         for provider in [LLMProvider::OpenAI, LLMProvider::Groq, LLMProvider::OpenRouter] {
             assert!(build_openai_compat_chat_body(&provider, "m", "s", "u", None, None, None, options).get("max_tokens").is_none());
         }
